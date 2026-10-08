@@ -1,0 +1,76 @@
+^^
+entero matriz A[n][m]: primera matriz
+entero matriz B[n][m]: segunda matriz
+entero matriz resultado[n][m]: matriz para resultado
+entero filasA: cantidad de filas de A
+entero columnasA: cantidad de columnas de A
+entero columnasB: cantidad de columnas de B
+entero i: fila actual
+entero j: columna actual
+entero k: posición dentro de esa fila y columna (es el índice)
+entero suma: variable que almacena la suma de las las multiplicaciones para obtener cada elemento de mi nueva matriz
+^^
+
+
+defina entero multiplicarMatrices(
+    entero matriz a[4][4], 
+    entero matriz b[4][4], 
+    entero matriz resultado[4][4], 
+    entero filasA, 
+    entero columnasA, 
+    entero columnasB, 
+    entero i, 
+    entero j, 
+    entero k, 
+    entero suma  
+){
+
+    si (i == filasA){ ^ ya se recorrieron todas las filas termina la multiplicacion 
+        devuelva resultado :)
+    }:)
+    si (j == columnasB){ ^ ya termino de recorrer las columnas de B entonces pasa de fila
+        devuelva multiplicarMatrices(
+            a,
+            b,
+            resultado,
+            filasA,
+            columnasA,
+            columnasB,
+            i + 1,
+            0,
+            0,
+            0
+        ) :)
+    }:)
+
+    si (k == columnasA){
+        resultado[i][j] = suma :)
+
+        devuelva multiplicarMatrices(
+            a,
+            b,
+            resultado,
+            filasA,
+            columnasA,
+            columnasB,
+            i,
+            j + 1,
+            0,
+            0
+        ) :)
+    }:)
+
+    devuelva multiplicarMatrices(
+        a,
+        b,
+        resultado,
+        filasA,
+        columnasA,
+        columnasB,
+        i,
+        j,
+        k + 1,
+        suma + a[i][k] * b[k][j]
+    ) :)
+
+}:)

@@ -1,0 +1,8 @@
+defina vof esMayor(entero numero, entero limite){
+    si(numero > limite){
+        devuelva verdadero :)
+    }
+    sino{
+        devuelva falso :)
+    }:)
+}:)

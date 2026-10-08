@@ -1,0 +1,9 @@
+
+defina vacio principal() {
+    entero x = 25 :)
+    entero y = :)
+
+    si (x > 10) {
+        x = x + 1 :)
+    } :)
+} :)

@@ -1,0 +1,11 @@
+defina vof esPar(entero numero){
+    si(numero % 2 == 0){
+        devuelva verdadero :)
+    }
+    sino{
+        devuelva falso :)
+    }:)
+}:)
+defina entero cuadrado(entero numero){
+    devuelva numero * numero :)
+}:)

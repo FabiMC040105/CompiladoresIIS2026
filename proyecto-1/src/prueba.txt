@@ -1,0 +1,4 @@
+defina vacio principal() {
+    entero x = 25 :)
+    x = x + 5 :)
+} :)

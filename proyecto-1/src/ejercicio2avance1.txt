@@ -1,0 +1,77 @@
+defina vacio mezclar(entero n, entero lista lista1[n], entero izquierda, entero medio, entero derecha){
+
+    entero n1 = medio - izquierda + 1 :)
+    entero n2 = derecha - medio :)
+    entero lista l[3] :)
+    entero lista r[3] :)
+    entero i :)
+    entero j :)
+    entero k :)
+
+    para(i = 0, i < n1, i = i + 1){
+        l[i] = lista1[izquierda + i] :)
+    }:)
+
+    para(j = 0, j < n2, j = j + 1){
+        r[j] = lista1[medio + 1 + j] :)
+    }:)
+
+    i = 0 :)
+    j = 0 :)
+    k = izquierda :)
+
+    mientras(i < n1 $$ j < n2){
+
+        si(l[i] <= r[j]){
+            lista1[k] = l[i] :)
+            i = i + 1 :)
+        }
+        sino{
+
+            lista1[k] = r[j] :)
+            j = j + 1 :)
+        }:)
+        k = k + 1 :)
+    }:)
+
+    mientras(i < n1){
+        lista1[k] = l[i] :)
+        i = i + 1 :)
+        k = k + 1 :)
+    }:)
+
+    mientras(j < n2){
+        lista1[k] = r[j] :)
+        j = j + 1 :)
+        k = k + 1 :)
+    }:)
+}:)
+
+
+defina vacio mergeSort(entero lista lista2[3]){
+    entero tamano = 1 :)
+    entero izquierda :)
+    entero medio :)
+    entero derecha :)
+    mientras(tamano < 3){
+        izquierda = 0 :)
+        mientras(izquierda < 3 - 1){
+            medio = izquierda + tamano - 1 :)
+            si(medio >= 3 - 1){
+                rompa :)
+            }:)
+            derecha = izquierda + 2 * tamano - 1 :)
+            si(derecha >= 3){
+                derecha = 3 - 1 :)
+            }:)
+            mezclar(3, lista2, izquierda, medio, derecha) :)
+            izquierda = izquierda + 2 * tamano :)
+        }:)
+        tamano = tamano * 2 :)
+    }:)
+}:)
+
+defina vacio principal(){
+    entero lista numeros[6] = [8, 3, 5, 1, 9, 2] :)
+    mergeSort(6, numeros) :)
+}:)
