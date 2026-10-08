@@ -6,36 +6,37 @@ TARGET := compilador
 LEXER := lexer.l
 PARSER := parser.y
 
-CFLAGS := -g -O0
-BISONFLAGS := -d 
-
-.RECIPEPREFIX := >
+CFLAGS := -Wall -Wextra -g -O0
+BISONFLAGS := -d -Wall
 
 .PHONY: all run clean rebuild
 
+# Archivo de prueba que se usa si no se indica otro
+FILE ?= pru1.txt
+
 all: $(TARGET)
 
-# Generar parser.tab.c y parser.tab.h
-parser.tab.c: $(PARSER)
->$(BISON) $(BISONFLAGS) -o $@ $<
+# Generar el parser y su archivo de cabecera
+parser.tab.c: $(PARSER) ast.h
+	$(BISON) $(BISONFLAGS) -o $@ $(PARSER)
 
-# Generar lex.yy.c
-lex.yy.c: $(LEXER) parser.tab.c
->$(FLEX) -o $@ $(LEXER)
+# Generar el lexer usando los tokens de Bison
+lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h
+	$(FLEX) -o $@ $(LEXER)
 
-# Compilar lexer y parser juntos
-$(TARGET): parser.tab.c lex.yy.c
->$(CC) $(CFLAGS) -o $@ parser.tab.c lex.yy.c -lfl
+# Compilar el lexer, el parser y las funciones del AST
+$(TARGET): parser.tab.c lex.yy.c ast.c ast.h
+	$(CC) $(CFLAGS) -o $@ parser.tab.c lex.yy.c ast.c
 
-# Ejecutar un archivo de prueba
+# Ejecutar el compilador con un archivo de prueba
 run: $(TARGET)
->./$(TARGET) < $(FILE)
+	./$(TARGET) < $(FILE)
 
-# Recompilar desde cero
+# Recompilar todo desde cero
 rebuild:
->$(MAKE) clean
->$(MAKE) all
+	$(MAKE) clean
+	$(MAKE) all
 
-# Eliminar archivos generados
+# Eliminar los archivos generados
 clean:
->rm -f $(TARGET) $(TARGET).exe parser.tab.c parser.tab.h lex.yy.c
+	rm -f $(TARGET) $(TARGET).exe parser.tab.c parser.tab.h lex.yy.c

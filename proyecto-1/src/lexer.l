@@ -12,6 +12,7 @@ ejecutará las reglas que tengan <COMENTARIO>
 %{
 #include <stdio.h>
 #include "parser.tab.h"
+#include "ast.h"
 %}
 
 %%
@@ -51,8 +52,17 @@ ejecutará las reglas que tengan <COMENTARIO>
 "$$"                  { printf("AND: %s\n", yytext); return AND; }
 "--"                  { printf("OR: %s\n", yytext); return OR; }
 
-"verdadero"           { printf("VERDADERO: %s\n", yytext); return VERDADERO; }
-"falso"               { printf("FALSO: %s\n", yytext); return FALSO; }
+"verdadero" {
+    printf("VERDADERO: %s\n", yytext);
+    yylval = ast_crear(AST_BOOLEANO, yytext);
+    return VERDADERO;
+}
+
+"falso" {
+    printf("FALSO: %s\n", yytext);
+    yylval = ast_crear(AST_BOOLEANO, yytext);
+    return FALSO;
+}
 
 "{"                   { printf("LLAVE_IZQ: %s\n", yytext); return '{'; }
 "}"                   { printf("LLAVE_DER: %s\n", yytext); return '}'; }
@@ -74,11 +84,15 @@ ejecutará las reglas que tengan <COMENTARIO>
 
 0|[1-9][0-9]* {
     printf("NUMERO: %s\n", yytext);
+/* Guardamos el numero para usarlo en el AST */
+    yylval = ast_crear(AST_NUMERO, yytext);
     return NUMERO;
 }
 
 [a-z][a-zA-Z_0-9]* {
     printf("IDENTIFICADOR: %s\n", yytext);
+/* Guardamos el nombre de la variable */
+    yylval = ast_crear(AST_VARIABLE, yytext);
     return IDENTIFICADOR;
 }
 

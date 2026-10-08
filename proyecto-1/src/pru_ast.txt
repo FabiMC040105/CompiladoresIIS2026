@@ -1,0 +1,4 @@
+defina vacio principal()
+{
+entero resultado = 2 + 3 * 4:)
+}:)
