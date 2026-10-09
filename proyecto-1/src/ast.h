@@ -18,6 +18,7 @@ typedef enum
     AST_FOR,
     AST_FUNCION,
     AST_PARAMETRO,
+    AST_PARAMETROS,
     AST_LLAMADA,
     AST_RETURN,
     AST_BREAK,

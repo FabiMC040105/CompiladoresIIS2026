@@ -8,19 +8,13 @@
 #include <string.h>
 #include "ast.h"
 
-/* Funcion que obtiene los tokens del lexer */
 int yylex(void);
-
-/* Numero de linea que mantiene Flex */
 extern int yylineno;
-
-/* Funcion para reportar errores */
 void yyerror(const char *s);
 
-/* Aqui guardamos la raiz del arbol */
 NodoAST *raiz = NULL;
 
-/* Une dos listas de nodos */
+/* Une dos listas de nodos hermanos. */
 static NodoAST *ast_unir(NodoAST *primero, NodoAST *segundo)
 {
     NodoAST *actual;
@@ -37,12 +31,13 @@ static NodoAST *ast_unir(NodoAST *primero, NodoAST *segundo)
     return primero;
 }
 
-/* Cambia el valor de un nodo */
+/* Cambia el valor de un nodo sin perder el valor anterior
+   hasta que la nueva memoria se haya reservado correctamente. */
 static void ast_cambiar_valor(NodoAST *nodo, const char *valor)
 {
     char *nuevo;
 
-    if (nodo == NULL)
+    if (nodo == NULL || valor == NULL)
         return;
 
     nuevo = malloc(strlen(valor) + 1);
@@ -58,15 +53,36 @@ static void ast_cambiar_valor(NodoAST *nodo, const char *valor)
     nodo->valor = nuevo;
 }
 
-/* Crea una operacion y agrega sus operandos */
+/* Crea un nodo de operación con sus operandos. */
 static NodoAST *ast_operacion(const char *operador,
-                             NodoAST *izquierdo,
-                             NodoAST *derecho)
+                              NodoAST *izquierdo,
+                              NodoAST *derecho)
 {
     NodoAST *nodo = ast_crear(AST_OPERACION, operador);
 
     ast_agregar_hijo(nodo, izquierdo);
     ast_agregar_hijo(nodo, derecho);
+
+    return nodo;
+}
+
+/* Crea una asignación con destino y expresión. */
+static NodoAST *ast_asignacion(NodoAST *destino, NodoAST *expresion)
+{
+    NodoAST *nodo = ast_crear(AST_ASIGNACION, "=");
+
+    ast_agregar_hijo(nodo, destino);
+    ast_agregar_hijo(nodo, expresion);
+
+    return nodo;
+}
+
+/* Envuelve una lista de parámetros en un nodo explícito. */
+static NodoAST *ast_crear_parametros(NodoAST *lista)
+{
+    NodoAST *nodo = ast_crear(AST_PARAMETROS, "parametros");
+
+    ast_agregar_hijo(nodo, lista);
 
     return nodo;
 }
@@ -88,7 +104,7 @@ static NodoAST *ast_operacion(const char *operador,
 /* Valores booleanos */
 %token VERDADERO FALSO
 
-/* Identificadores y numeros */
+/* Identificadores y números */
 %token NUMERO IDENTIFICADOR
 
 /* Importaciones */
@@ -97,6 +113,68 @@ static NodoAST *ast_operacion(const char *operador,
 /* Otros tokens */
 %token ERROR_LEXICO FIN_LINEA
 
+/*
+ * Los siguientes tokens crean nodos en lexer.l.
+ * Solo se les aplica destructor a esos tokens con valores
+ * semánticos propios.
+ */
+%destructor { ast_liberar($$); } NUMERO IDENTIFICADOR VERDADERO FALSO
+
+/*
+ * Estos no terminales pueden contener nodos AST.
+ * Si Bison los descarta durante la recuperación de un error,
+ * se libera el árbol que posean.
+ *
+ * Programa se excluye porque su valor se conserva en raiz
+ * cuando el análisis termina correctamente.
+ */
+%destructor { ast_liberar($$); }
+    Importaciones
+    Importacion
+    Globales
+    Unidades
+    RestoDefinicion
+    FirmaFuncion
+    RestoVacio
+    Parametros
+    ParametrosResto
+    Parametro
+    Dimension
+    Bloque
+    Sentencias
+    Sentencia
+    Declaracion
+    Inicializacion
+    Inicializadorlista
+    Inicializadormatriz
+    Filas
+    RestoFilas
+    Fila
+    Elementos
+    RestoElementos
+    Asignacion
+    Destino
+    Acceso
+    If
+    Continuacionif
+    While
+    For
+    InicioFor
+    Return
+    Break
+    Llamada
+    Argumentos
+    RestoArgumentos
+    Expresion
+    ExprAnd
+    ExprComp
+    Comparador
+    ExprArit
+    Termino
+    Potencia
+    Unario
+    Primario
+
 %%
 
 /* Programa completo */
@@ -104,9 +182,11 @@ Programa
     : Importaciones Globales Unidades
       {
           raiz = ast_crear(AST_PROGRAMA, "programa");
+
           ast_agregar_hijo(raiz, $1);
           ast_agregar_hijo(raiz, $2);
           ast_agregar_hijo(raiz, $3);
+
           $$ = raiz;
       }
     ;
@@ -175,7 +255,8 @@ RestoDefinicion
 FirmaFuncion
     : IDENTIFICADOR '(' Parametros ')' Bloque FIN_LINEA
       {
-          $$ = ast_crear(AST_FUNCION, "funcion");
+          $$ = ast_crear(AST_FUNCION, "entero");
+
           ast_agregar_hijo($$, $1);
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
@@ -200,15 +281,15 @@ RestoVacio
       }
     ;
 
-/* Parametros */
+/* Parámetros */
 Parametros
     : Parametro ParametrosResto
       {
-          $$ = ast_unir($1, $2);
+          $$ = ast_crear_parametros(ast_unir($1, $2));
       }
     |
       {
-          $$ = NULL;
+          $$ = ast_crear_parametros(NULL);
       }
     ;
 
@@ -237,12 +318,14 @@ Parametro
     | ENTERO LISTA IDENTIFICADOR '[' Dimension ']'
       {
           $$ = ast_crear(AST_PARAMETRO, "entero lista");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
       }
     | ENTERO MATRIZ IDENTIFICADOR '[' Dimension ']' '[' Dimension ']'
       {
           $$ = ast_crear(AST_PARAMETRO, "entero matriz");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
           ast_agregar_hijo($$, $8);
@@ -261,7 +344,7 @@ Dimension
       }
     ;
 
-/* Bloques de codigo */
+/* Bloques de código */
 Bloque
     : '{' Sentencias '}'
       {
@@ -322,25 +405,45 @@ Declaracion
     : ENTERO IDENTIFICADOR Inicializacion FIN_LINEA
       {
           $$ = ast_crear(AST_DECLARACION, "entero");
-          ast_agregar_hijo($$, $2);
-          ast_agregar_hijo($$, $3);
+
+          if ($3 != NULL)
+          {
+              NodoAST *asignacion = ast_asignacion($2, $3);
+              ast_agregar_hijo($$, asignacion);
+          }
+          else
+          {
+              ast_agregar_hijo($$, $2);
+          }
       }
     | VOF IDENTIFICADOR Inicializacion FIN_LINEA
       {
           $$ = ast_crear(AST_DECLARACION, "vof");
-          ast_agregar_hijo($$, $2);
-          ast_agregar_hijo($$, $3);
+
+          if ($3 != NULL)
+          {
+              NodoAST *asignacion = ast_asignacion($2, $3);
+              ast_agregar_hijo($$, asignacion);
+          }
+          else
+          {
+              ast_agregar_hijo($$, $2);
+          }
       }
-    | ENTERO LISTA IDENTIFICADOR '[' Dimension ']' Inicializadorlista FIN_LINEA
+    | ENTERO LISTA IDENTIFICADOR '[' Dimension ']'
+      Inicializadorlista FIN_LINEA
       {
           $$ = ast_crear(AST_LISTA, "declaracion entero");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
           ast_agregar_hijo($$, $7);
       }
-    | ENTERO MATRIZ IDENTIFICADOR '[' Dimension ']' '[' Dimension ']' Inicializadormatriz FIN_LINEA
+    | ENTERO MATRIZ IDENTIFICADOR '[' Dimension ']'
+      '[' Dimension ']' Inicializadormatriz FIN_LINEA
       {
           $$ = ast_crear(AST_MATRIZ, "declaracion entero");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
           ast_agregar_hijo($$, $8);
@@ -437,9 +540,7 @@ RestoElementos
 Asignacion
     : Destino '=' Expresion
       {
-          $$ = ast_crear(AST_ASIGNACION, "=");
-          ast_agregar_hijo($$, $1);
-          ast_agregar_hijo($$, $3);
+          $$ = ast_asignacion($1, $3);
       }
     ;
 
@@ -459,12 +560,14 @@ Acceso
     | IDENTIFICADOR '[' ExprArit ']'
       {
           $$ = ast_crear(AST_OPERACION, "acceso_lista");
+
           ast_agregar_hijo($$, $1);
           ast_agregar_hijo($$, $3);
       }
     | IDENTIFICADOR '[' ExprArit ']' '[' ExprArit ']'
       {
           $$ = ast_crear(AST_OPERACION, "acceso_matriz");
+
           ast_agregar_hijo($$, $1);
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $6);
@@ -476,6 +579,7 @@ If
     : SI '(' Expresion ')' Bloque Continuacionif
       {
           $$ = ast_crear(AST_IF, "si");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
           ast_agregar_hijo($$, $6);
@@ -495,6 +599,7 @@ Continuacionif
     | SINOSI '(' Expresion ')' Bloque Continuacionif
       {
           $$ = ast_crear(AST_IF, "sinosi");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
           ast_agregar_hijo($$, $6);
@@ -506,6 +611,7 @@ While
     : MIENTRAS '(' Expresion ')' Bloque FIN_LINEA
       {
           $$ = ast_crear(AST_WHILE, "mientras");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
       }
@@ -516,6 +622,7 @@ For
     : PARA '(' InicioFor ',' Expresion ',' Asignacion ')' Bloque FIN_LINEA
       {
           $$ = ast_crear(AST_FOR, "para");
+
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
           ast_agregar_hijo($$, $7);
@@ -531,8 +638,9 @@ InicioFor
     | ENTERO IDENTIFICADOR '=' Expresion
       {
           $$ = ast_crear(AST_DECLARACION, "entero");
-          ast_agregar_hijo($$, $2);
-          ast_agregar_hijo($$, $4);
+
+          NodoAST *asignacion = ast_asignacion($2, $4);
+          ast_agregar_hijo($$, asignacion);
       }
     ;
 
@@ -558,6 +666,7 @@ Llamada
     : IDENTIFICADOR '(' Argumentos ')'
       {
           $$ = ast_crear(AST_LLAMADA, $1->valor);
+
           ast_liberar($1);
           ast_agregar_hijo($$, $3);
       }
@@ -585,7 +694,7 @@ RestoArgumentos
       }
     ;
 
-/* Expresiones logicas */
+/* Expresiones lógicas */
 Expresion
     : Expresion OR ExprAnd
       {
@@ -648,7 +757,7 @@ Comparador
       }
     ;
 
-/* Operaciones aritmeticas */
+/* Operaciones aritméticas */
 ExprArit
     : ExprArit '+' Termino
       {
@@ -705,7 +814,7 @@ Unario
       }
     ;
 
-/* Valores, variables, llamadas y expresiones entre parentesis */
+/* Valores, variables, llamadas y expresiones entre paréntesis */
 Primario
     : NUMERO
       {
@@ -735,7 +844,6 @@ Primario
 
 %%
 
-/* Manejo de errores */
 void yyerror(const char *s)
 {
     fprintf(stderr,
@@ -744,10 +852,11 @@ void yyerror(const char *s)
             s);
 }
 
-/* Analiza el programa e imprime el arbol */
 int main(void)
 {
-    if (yyparse() == 0)
+    int resultado = yyparse();
+
+    if (resultado == 0)
     {
         printf("\nPrograma sintacticamente correcto.\n");
 
@@ -756,15 +865,20 @@ int main(void)
             printf("\nArbol de sintaxis abstracta:\n");
             ast_imprimir(raiz, 0);
             ast_liberar(raiz);
+            raiz = NULL;
         }
 
-        return 0;
+        return EXIT_SUCCESS;
     }
 
     printf("Programa sintacticamente incorrecto.\n");
 
-    if (raiz != NULL)
-        ast_liberar(raiz);
+    /*
+     * Si el análisis falla antes de reducir Programa,
+     * Bison libera los valores semánticos descartados mediante
+     * los destructores definidos arriba.
+     */
+    raiz = NULL;
 
-    return 1;
+    return EXIT_FAILURE;
 }
