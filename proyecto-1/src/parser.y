@@ -207,6 +207,7 @@ Importacion
     : TRAIGASE '"' IDENTIFICADOR EXTENSION_E '"' FIN_LINEA
       {
           $$ = ast_crear(AST_IMPORTACION, $3->valor);
+          $$->linea = $3->linea;
           ast_liberar($3);
       }
     ;
@@ -403,37 +404,21 @@ Sentencia
 /* Declaraciones de variables */
 Declaracion
     : ENTERO IDENTIFICADOR Inicializacion FIN_LINEA
-      {
-          $$ = ast_crear(AST_DECLARACION, "entero");
-
-          if ($3 != NULL)
-          {
-              NodoAST *asignacion = ast_asignacion($2, $3);
-              ast_agregar_hijo($$, asignacion);
-          }
-          else
-          {
-              ast_agregar_hijo($$, $2);
-          }
-      }
+    {
+        $$ = ast_crear(AST_DECLARACION, "entero");
+        ast_agregar_hijo($$, $2);
+        ast_agregar_hijo($$, $3);
+    }
     | VOF IDENTIFICADOR Inicializacion FIN_LINEA
-      {
-          $$ = ast_crear(AST_DECLARACION, "vof");
-
-          if ($3 != NULL)
-          {
-              NodoAST *asignacion = ast_asignacion($2, $3);
-              ast_agregar_hijo($$, asignacion);
-          }
-          else
-          {
-              ast_agregar_hijo($$, $2);
-          }
-      }
+    {
+        $$ = ast_crear(AST_DECLARACION, "vof");
+        ast_agregar_hijo($$, $2);
+        ast_agregar_hijo($$, $3);
+    }
     | ENTERO LISTA IDENTIFICADOR '[' Dimension ']'
       Inicializadorlista FIN_LINEA
       {
-          $$ = ast_crear(AST_LISTA, "declaracion entero");
+          $$ = ast_crear(AST_DECL_LISTA, "entero");
 
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
@@ -442,7 +427,7 @@ Declaracion
     | ENTERO MATRIZ IDENTIFICADOR '[' Dimension ']'
       '[' Dimension ']' Inicializadormatriz FIN_LINEA
       {
-          $$ = ast_crear(AST_MATRIZ, "declaracion entero");
+          $$ = ast_crear(AST_DECL_MATRIZ, "entero");
 
           ast_agregar_hijo($$, $3);
           ast_agregar_hijo($$, $5);
@@ -466,7 +451,7 @@ Inicializacion
 Inicializadorlista
     : '=' '[' Elementos ']'
       {
-          $$ = ast_crear(AST_LISTA, "inicializacion");
+          $$ = ast_crear(AST_LISTA, "literal");
           ast_agregar_hijo($$, $3);
       }
     |
@@ -478,7 +463,7 @@ Inicializadorlista
 Inicializadormatriz
     : '=' '[' Filas ']'
       {
-          $$ = ast_crear(AST_MATRIZ, "inicializacion");
+          $$ = ast_crear(AST_MATRIZ, "literal");
           ast_agregar_hijo($$, $3);
       }
     |
@@ -559,14 +544,14 @@ Acceso
       }
     | IDENTIFICADOR '[' ExprArit ']'
       {
-          $$ = ast_crear(AST_OPERACION, "acceso_lista");
+          $$ = ast_crear(AST_ACCESO_LISTA, NULL);
 
           ast_agregar_hijo($$, $1);
           ast_agregar_hijo($$, $3);
       }
     | IDENTIFICADOR '[' ExprArit ']' '[' ExprArit ']'
       {
-          $$ = ast_crear(AST_OPERACION, "acceso_matriz");
+          $$ = ast_crear(AST_ACCESO_MATRIZ, NULL);
 
           ast_agregar_hijo($$, $1);
           ast_agregar_hijo($$, $3);
@@ -593,8 +578,7 @@ Continuacionif
       }
     | SINO Bloque FIN_LINEA
       {
-          $$ = ast_crear(AST_IF, "sino");
-          ast_agregar_hijo($$, $2);
+        $$ = $2;
       }
     | SINOSI '(' Expresion ')' Bloque Continuacionif
       {
@@ -635,13 +619,12 @@ InicioFor
       {
           $$ = $1;
       }
-    | ENTERO IDENTIFICADOR '=' Expresion
-      {
-          $$ = ast_crear(AST_DECLARACION, "entero");
-
-          NodoAST *asignacion = ast_asignacion($2, $4);
-          ast_agregar_hijo($$, asignacion);
-      }
+     | ENTERO IDENTIFICADOR '=' Expresion
+     {
+         $$ = ast_crear(AST_DECLARACION, "entero");
+         ast_agregar_hijo($$, $2);
+         ast_agregar_hijo($$, $4);
+     }
     ;
 
 /* Devolver un valor */
@@ -666,7 +649,7 @@ Llamada
     : IDENTIFICADOR '(' Argumentos ')'
       {
           $$ = ast_crear(AST_LLAMADA, $1->valor);
-
+          $$->linea = $1->linea;
           ast_liberar($1);
           ast_agregar_hijo($$, $3);
       }

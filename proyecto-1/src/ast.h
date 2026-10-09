@@ -13,6 +13,8 @@ typedef enum
     AST_BOOLEANO,
     AST_VARIABLE,
     AST_OPERACION,
+    AST_ACCESO_LISTA,      
+    AST_ACCESO_MATRIZ,     
     AST_IF,
     AST_WHILE,
     AST_FOR,
@@ -22,6 +24,8 @@ typedef enum
     AST_LLAMADA,
     AST_RETURN,
     AST_BREAK,
+    AST_DECL_LISTA,        
+    AST_DECL_MATRIZ,       
     AST_LISTA,
     AST_MATRIZ,
     AST_IMPORTACION
@@ -32,6 +36,7 @@ typedef struct NodoAST
 {
     TipoNodo tipo;
     char *valor;
+    int linea;
     struct NodoAST *hijo;
     struct NodoAST *siguiente;
 } NodoAST;

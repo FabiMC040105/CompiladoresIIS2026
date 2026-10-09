@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Numero de linea actual, mantenido por Flex */
+extern int yylineno;
 /* Crea un nodo nuevo y guarda su valor */
 NodoAST *ast_crear(TipoNodo tipo, const char *valor)
 {
@@ -15,6 +17,7 @@ if (nodo == NULL) {
 
 nodo->tipo = tipo;
 nodo->valor = NULL;
+nodo->linea = yylineno;
 nodo->hijo = NULL;
 nodo->siguiente = NULL;
 
@@ -44,6 +47,7 @@ if (padre == NULL || hijo == NULL) {
 }
 
 if (padre->hijo == NULL) {
+    padre->linea = hijo->linea;
     padre->hijo = hijo;
     return;
 }
@@ -71,6 +75,8 @@ case AST_NUMERO: return "NUMERO";
 case AST_BOOLEANO: return "BOOLEANO";
 case AST_VARIABLE: return "VARIABLE";
 case AST_OPERACION: return "OPERACION";
+case AST_ACCESO_LISTA: return "ACCESO_LISTA";
+case AST_ACCESO_MATRIZ: return "ACCESO_MATRIZ";
 case AST_IF: return "IF";
 case AST_WHILE: return "WHILE";
 case AST_FOR: return "FOR";
@@ -80,6 +86,8 @@ case AST_PARAMETROS: return "PARAMETROS";
 case AST_LLAMADA: return "LLAMADA";
 case AST_RETURN: return "RETURN";
 case AST_BREAK: return "BREAK";
+case AST_DECL_LISTA: return "DECL_LISTA";
+case AST_DECL_MATRIZ: return "DECL_MATRIZ";
 case AST_LISTA: return "LISTA";
 case AST_MATRIZ: return "MATRIZ";
 case AST_IMPORTACION: return "IMPORTACION";
@@ -151,6 +159,7 @@ if (nodo->valor != NULL) {
     ast_escribir_texto_dot(archivo, nodo->valor);
 }
 
+fprintf(archivo, "\\n(linea %d)", nodo->linea);
 fputs("\"];\n", archivo);
 
 /* Conecta el nodo con su padre */
