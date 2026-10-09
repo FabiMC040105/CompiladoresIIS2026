@@ -87,51 +87,44 @@ static const char *ast_nombre_tipo(TipoNodo tipo)
     }
 }
 
-/* Imprime los nodos con sus ramas */
+/* Imprime un nodo y sus ramas */
 static void ast_imprimir_ramas(NodoAST *nodo, const char *prefijo, int ultimo)
 {
-    while (nodo != NULL) {
-        /* Imprime la rama y el nombre del nodo */
-        printf("%s", prefijo);
-        printf("%s", ultimo ? "└── " : "├── ");
+    if (nodo == NULL) {
+        return;
+    }
 
-        printf("%s", ast_nombre_tipo(nodo->tipo));
+    /* Imprime la rama y el nombre del nodo */
+    printf("%s", prefijo);
+    printf("%s", ultimo ? "└── " : "├── ");
 
-        if (nodo->valor != NULL) {
-            printf(": %s", nodo->valor);
-        }
+    printf("%s", ast_nombre_tipo(nodo->tipo));
 
-        printf("\n");
+    if (nodo->valor != NULL) {
+        printf(": %s", nodo->valor);
+    }
 
-        /* Prepara los espacios que van a usar los hijos */
-        char nuevo_prefijo[1024];
+    printf("\n");
 
-        snprintf(nuevo_prefijo, sizeof(nuevo_prefijo), "%s%s",
-                 prefijo, ultimo ? "    " : "│   ");
+    /* Prepara los espacios que van a usar los hijos */
+    char nuevo_prefijo[1024];
 
-        /* Imprime los hijos del nodo actual */
-        if (nodo->hijo != NULL) {
-            NodoAST *hijo = nodo->hijo;
+    snprintf(nuevo_prefijo, sizeof(nuevo_prefijo), "%s%s",
+             prefijo, ultimo ? "    " : "│   ");
 
-            while (hijo != NULL) {
-                int es_ultimo = (hijo->siguiente == NULL);
+    /* Imprime los hijos del nodo actual */
+    NodoAST *hijo = nodo->hijo;
 
-                ast_imprimir_ramas(hijo, nuevo_prefijo, es_ultimo);
+    while (hijo != NULL) {
+        int es_ultimo = (hijo->siguiente == NULL);
 
-                hijo = hijo->siguiente;
-            }
-        }
+        ast_imprimir_ramas(hijo, nuevo_prefijo, es_ultimo);
 
-        /* Continúa con el siguiente nodo del mismo nivel */
-        if (nodo->siguiente == NULL) {
-            break;
-        }
-
-        nodo = nodo->siguiente;
+        hijo = hijo->siguiente;
     }
 }
 
-/* Imprime la raiz del arbol y todos sus hijos */
+/* Imprime la raiz y todos sus hijos */
 void ast_imprimir(NodoAST *nodo, int nivel)
 {
     (void)nivel;
@@ -150,16 +143,14 @@ void ast_imprimir(NodoAST *nodo, int nivel)
     printf("\n");
 
     /* Imprime los hijos de la raiz con sus ramas */
-    if (nodo->hijo != NULL) {
-        NodoAST *hijo = nodo->hijo;
+    NodoAST *hijo = nodo->hijo;
 
-        while (hijo != NULL) {
-            int es_ultimo = (hijo->siguiente == NULL);
+    while (hijo != NULL) {
+        int es_ultimo = (hijo->siguiente == NULL);
 
-            ast_imprimir_ramas(hijo, "", es_ultimo);
+        ast_imprimir_ramas(hijo, "", es_ultimo);
 
-            hijo = hijo->siguiente;
-        }
+        hijo = hijo->siguiente;
     }
 }
 

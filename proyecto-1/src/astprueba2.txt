@@ -1,0 +1,4 @@
+entero resultado1 = 5 + 10 * 2 :)
+entero resultado2 = (5 + 10) * 2 :)
+entero resultado3 = 5 * (10 + 2) :)
+entero resultado4 = (5 + 10) * (2 + 3) :)
