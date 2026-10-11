@@ -9,7 +9,7 @@ PARSER := parser.y
 CFLAGS := -Wall -Wextra -g -O0
 BISONFLAGS := -d -Wall
 
-.PHONY: all run clean rebuild
+.PHONY: all run clean rebuild test-codegen
 
 # Archivo de prueba que se usa si no se indica otro
 FILE ?= pru1.txt
@@ -38,6 +38,11 @@ run: $(TARGET)
 rebuild:
 	$(MAKE) clean
 	$(MAKE) all
+
+test-codegen:
+	$(CC) $(CFLAGS) -std=c11 -o test_codegen \
+		test_codegen.c ast.c asm_emitter.c codegen.c
+	./test_codegen
 
 # Eliminar los archivos generados
 clean:

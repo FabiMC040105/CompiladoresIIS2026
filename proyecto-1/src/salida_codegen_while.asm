@@ -1,0 +1,224 @@
+# Ensamblador intermedio generado por cdff
+# Cada instruccion emitida ocupa un bundle de 16 bytes
+principal:
+# declaracion a
+ALU: ADDI x4, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# declaracion b
+ALU: ADDI x4, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# inicio mientras linea 1
+inicio_while_0:
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 3
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BGE x4, x5, fin_while_1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x4, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# inicio mientras linea 1
+inicio_while_2:
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BGE x4, x5, fin_while_3
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# condicion si linea 1
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 2
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BNE x4, x5, fin_if_4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# rompa -> fin_while_3
+BRU: JMP fin_while_3
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+fin_if_4:
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADD x4, x4, x5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: JMP inicio_while_2
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+fin_while_3:
+# condicion si linea 1
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BNE x4, x5, fin_if_5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# rompa -> fin_while_1
+BRU: JMP fin_while_1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+fin_if_5:
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADD x4, x4, x5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: JMP inicio_while_0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+fin_while_1:
+fin_programa:
+BRU: JMP fin_programa

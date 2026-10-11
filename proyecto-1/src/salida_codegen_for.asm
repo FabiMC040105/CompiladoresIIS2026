@@ -1,0 +1,160 @@
+# Ensamblador intermedio generado por cdff
+# Cada instruccion emitida ocupa un bundle de 16 bytes
+principal:
+# declaracion total
+ALU: ADDI x4, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# inicializacion para linea 1
+# declaracion i
+ALU: ADDI x4, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+inicio_for_0:
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BGE x4, x5, fin_for_2
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# condicion si linea 1
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 2
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BNE x4, x5, fin_if_3
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# rompa -> fin_for_2
+BRU: JMP fin_for_2
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+fin_if_3:
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x5, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADD x4, x4, x5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+incremento_for_1:
+# incremento para
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADD x4, x4, x5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: JMP inicio_for_0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+fin_for_2:
+fin_programa:
+BRU: JMP fin_programa
