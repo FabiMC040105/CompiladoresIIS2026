@@ -13,26 +13,37 @@ ejecutará las reglas que tengan <COMENTARIO>
 #include <stdio.h>
 #include "parser.tab.h"
 #include "ast.h"
+#include "tabla_simbolos.h"
+/* Avisos para registrar el contexto de bloques e identificadores.
+   No modifican la secuencia de tokens de Flex. */
+void parser_abrir_ambito_lexico(int linea);
+void parser_abrir_ambito_para_lexico(int linea);
+void parser_indicar_bloque(const char *tipo, int linea);
+void parser_cerrar_ambito_lexico(void);
+void parser_marcar_identificador(NodoAST *nodo);
+void parser_avisar_defina(void);
+void parser_avisar_tipo(TipoDato tipo);
+void parser_marcar_principal(int linea);
 %}
 
 %%
 
-"si"                  { printf("SI: %s\n", yytext); return SI; }
-"sino"                { printf("SINO: %s\n", yytext); return SINO; }
-"sinosi"              { printf("SINOSI: %s\n", yytext); return SINOSI; }
-"mientras"            { printf("MIENTRAS: %s\n", yytext); return MIENTRAS; }
-"para"                { printf("PARA: %s\n", yytext); return PARA; }
+"si"                  { parser_indicar_bloque("si", yylineno); printf("SI: %s\n", yytext); return SI; }
+"sino"                { parser_indicar_bloque("sino", yylineno); printf("SINO: %s\n", yytext); return SINO; }
+"sinosi"              { parser_indicar_bloque("sinosi", yylineno); printf("SINOSI: %s\n", yytext); return SINOSI; }
+"mientras"            { parser_indicar_bloque("mientras", yylineno); printf("MIENTRAS: %s\n", yytext); return MIENTRAS; }
+"para"                { parser_abrir_ambito_para_lexico(yylineno); printf("PARA: %s\n", yytext); return PARA; }
 "devuelva"            { printf("DEVUELVA: %s\n", yytext); return DEVUELVA; }
-"defina"              { printf("DEFINA: %s\n", yytext); return DEFINA; }
+"defina"              { parser_avisar_defina(); printf("DEFINA: %s\n", yytext); return DEFINA; }
 "rompa"               { printf("ROMPA: %s\n", yytext); return ROMPA; }
-"principal"           { printf("PRINCIPAL: %s\n", yytext); return PRINCIPAL; }
+"principal"           { parser_marcar_principal(yylineno); printf("PRINCIPAL: %s\n", yytext); return PRINCIPAL; }
 
 "lista"               { printf("LISTA: %s\n", yytext); return LISTA; }
 "matriz"              { printf("MATRIZ: %s\n", yytext); return MATRIZ; }
 
-"vof"                 { printf("VOF: %s\n", yytext); return VOF; }
-"entero"              { printf("ENTERO: %s\n", yytext); return ENTERO; }
-"vacio"               { printf("VACIO: %s\n", yytext); return VACIO; }
+"vof"                 { parser_avisar_tipo(TIPO_VOF); printf("VOF: %s\n", yytext); return VOF; }
+"entero"              { parser_avisar_tipo(TIPO_ENTERO); printf("ENTERO: %s\n", yytext); return ENTERO; }
+"vacio"               { parser_avisar_tipo(TIPO_VACIO); printf("VACIO: %s\n", yytext); return VACIO; }
 
 "+"                   { printf("SUMA: %s\n", yytext); return '+'; }
 "-"                   { printf("RESTA: %s\n", yytext); return '-'; }
@@ -64,8 +75,8 @@ ejecutará las reglas que tengan <COMENTARIO>
     return FALSO;
 }
 
-"{"                   { printf("LLAVE_IZQ: %s\n", yytext); return '{'; }
-"}"                   { printf("LLAVE_DER: %s\n", yytext); return '}'; }
+"{"                   { parser_abrir_ambito_lexico(yylineno); printf("LLAVE_IZQ: %s\n", yytext); return '{'; }
+"}"                   { parser_cerrar_ambito_lexico(); printf("LLAVE_DER: %s\n", yytext); return '}'; }
 "("                   { printf("PARENTESIS_IZQ: %s\n", yytext); return '('; }
 ")"                   { printf("PARENTESIS_DER: %s\n", yytext); return ')'; }
 "["                   { printf("CORCHETE_IZQ: %s\n", yytext); return '['; }
@@ -93,6 +104,7 @@ ejecutará las reglas que tengan <COMENTARIO>
     printf("IDENTIFICADOR: %s\n", yytext);
 /* Guardamos el nombre de la variable */
     yylval = ast_crear(AST_VARIABLE, yytext);
+    parser_marcar_identificador(yylval);
     return IDENTIFICADOR;
 }
 
