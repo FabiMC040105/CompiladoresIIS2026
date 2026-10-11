@@ -25,12 +25,25 @@ typedef struct {
     uint32_t dimensiones[2];
 } CodegenSimbolo;
 
+/* Resolvedor legado: suficiente para pruebas simples sin shadowing. */
 typedef int (*CodegenResolverSimbolo)(void *contexto,
                                       const char *nombre,
                                       CodegenSimbolo *salida);
 
+/*
+ * Resolvedor recomendado para la integracion real con Fase 3.
+ * Recibe el nodo identificador concreto del AST, lo que permite usar
+ * la marca nodo->ambito que ya mantiene el parser/semantico y resolver
+ * correctamente nombres repetidos en ambitos distintos.
+ */
+typedef int (*CodegenResolverSimboloNodo)(void *contexto,
+                                          const NodoAST *nodo_identificador,
+                                          const char *nombre,
+                                          CodegenSimbolo *salida);
+
 typedef struct {
     CodegenResolverSimbolo resolver_simbolo;
+    CodegenResolverSimboloNodo resolver_simbolo_nodo;
     void *contexto_simbolos;
     unsigned nops_dependencia;
 } CodegenConfig;

@@ -7,12 +7,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define REG_SP 2
+#define REG_FP 3
 #define REG_TEMP_PRIMERO 4
 #define REG_TEMP_ULTIMO 12
 #define REG_DIRECCION 13
+#define REG_RETORNO_DIRECCION 14
+#define REG_RETORNO_VALOR 15
 #define NOPS_POR_DEFECTO 4
 #define MAX_NIVELES_BUCLE 32
 #define TAMANO_ELEMENTO_BYTES 4u
+#define PILA_INICIAL_DEFECTO 0x0000FFFCu
 
 typedef struct {
     AsmEmitter emisor;
@@ -21,6 +26,10 @@ typedef struct {
     int errores;
     int encontro_principal;
     unsigned contador_etiquetas;
+    NodoAST *raiz;
+    const char *funcion_actual;
+    char etiqueta_retorno_funcion[96];
+    int dentro_funcion;
     struct {
         char etiqueta_break[64];
         char etiqueta_continue[64];
@@ -199,7 +208,10 @@ static int resolver(Codegen *cg,
                     const char *nombre,
                     CodegenSimbolo *simbolo)
 {
-    if (cg->config.resolver_simbolo == NULL) {
+    int encontrado = 0;
+
+    if (cg->config.resolver_simbolo_nodo == NULL &&
+        cg->config.resolver_simbolo == NULL) {
         error_codegen(cg, nodo,
                       "no hay un resolvedor de simbolos conectado para '%s'",
                       nombre);
@@ -214,9 +226,22 @@ static int resolver(Codegen *cg,
     memset(simbolo, 0, sizeof(*simbolo));
     simbolo->forma = CODEGEN_FORMA_ESCALAR;
 
-    if (!cg->config.resolver_simbolo(cg->config.contexto_simbolos,
-                                     nombre,
-                                     simbolo)) {
+    /*
+     * Para la integracion real se prefiere resolver por nodo. El parser de
+     * Fase 3 ya asocia identificadores concretos con su ambito, por lo que
+     * esta interfaz permite distinguir, por ejemplo, un "resultado" local
+     * de otro "resultado" declarado en principal.
+     */
+    if (cg->config.resolver_simbolo != NULL) {
+        /* Compatibilidad con los pasos anteriores. */
+        encontrado = cg->config.resolver_simbolo(
+            cg->config.contexto_simbolos, nombre, simbolo);
+    } else if (cg->config.resolver_simbolo_nodo != NULL) {
+        encontrado = cg->config.resolver_simbolo_nodo(
+            cg->config.contexto_simbolos, nodo, nombre, simbolo);
+    }
+
+    if (!encontrado) {
         error_codegen(cg, nodo, "simbolo no encontrado: %s", nombre);
         return 0;
     }
@@ -247,13 +272,13 @@ static int cargar_variable(Codegen *cg, NodoAST *nodo, const char *nombre)
 }
 
 static int guardar_variable(Codegen *cg,
-                            NodoAST *nodo,
+                            NodoAST *identificador,
                             const char *nombre,
                             int reg_valor)
 {
     CodegenSimbolo simbolo;
 
-    if (!resolver(cg, nodo, nombre, &simbolo))
+    if (!resolver(cg, identificador, nombre, &simbolo))
         return 0;
 
     if (!emitir_constante(cg, REG_DIRECCION, (int32_t)simbolo.direccion))
@@ -265,7 +290,41 @@ static int guardar_variable(Codegen *cg,
 }
 
 
+/* Busca una definicion de funcion de nivel superior por nombre. */
+static NodoAST *buscar_funcion_ast(Codegen *cg, const char *nombre)
+{
+    NodoAST *nodo;
+
+    if (cg == NULL || cg->raiz == NULL || nombre == NULL)
+        return NULL;
+
+    nodo = (cg->raiz->tipo == AST_PROGRAMA) ? cg->raiz->hijo : cg->raiz;
+
+    while (nodo != NULL) {
+        if (nodo->tipo == AST_FUNCION) {
+            NodoAST *identificador = hijo_n(nodo, 0);
+            if (identificador != NULL && identificador->valor != NULL &&
+                strcmp(identificador->valor, nombre) == 0)
+                return nodo;
+        }
+        nodo = nodo->siguiente;
+    }
+
+    return NULL;
+}
+
+static unsigned contar_hermanos(NodoAST *nodo)
+{
+    unsigned cantidad = 0;
+    while (nodo != NULL) {
+        cantidad++;
+        nodo = nodo->siguiente;
+    }
+    return cantidad;
+}
+
 static int generar_expresion(Codegen *cg, NodoAST *nodo);
+static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado);
 
 static int es_comparador(const char *op)
 {
@@ -1240,6 +1299,176 @@ static int guardar_elemento_literal(Codegen *cg,
 }
 
 
+/*
+ * Convencion de llamadas de la primera version:
+ *   x2  = SP para preservar registros del llamador y x14.
+ *   x14 = direccion de retorno.
+ *   x15 = valor de retorno.
+ *   x4-x12 son temporales del generador y se salvan alrededor de CALL.
+ *
+ * Los parametros escalares se copian a las direcciones asignadas por la
+ * tabla de simbolos del callee. Esto permite factorial y llamadas normales.
+ * La asignacion dinamica de frames para recursividad se integrara cuando la
+ * Fase 3 congele offsets de parametros/locales; no se inventa CALL/RET ISA.
+ */
+static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
+{
+    NodoAST *funcion;
+    NodoAST *parametros;
+    NodoAST *parametro;
+    NodoAST *argumento;
+    NodoAST *id_parametro;
+    unsigned cantidad_parametros;
+    unsigned cantidad_argumentos;
+    int reg;
+    int reg_resultado = -1;
+    int delta_retorno;
+    char etiqueta_funcion[160];
+
+    if (nodo == NULL || nodo->valor == NULL) {
+        error_codegen(cg, nodo, "llamada sin nombre de funcion");
+        return -1;
+    }
+
+    funcion = buscar_funcion_ast(cg, nodo->valor);
+    if (funcion == NULL) {
+        error_codegen(cg, nodo, "funcion no encontrada: %s", nodo->valor);
+        return -1;
+    }
+
+    parametros = hijo_n(funcion, 1);
+    parametro = parametros != NULL ? parametros->hijo : NULL;
+    argumento = nodo->hijo;
+
+    cantidad_parametros = contar_hermanos(parametro);
+    cantidad_argumentos = contar_hermanos(argumento);
+
+    if (cantidad_parametros != cantidad_argumentos) {
+        error_codegen(cg, nodo,
+                      "la funcion '%s' espera %u argumentos y recibio %u",
+                      nodo->valor, cantidad_parametros, cantidad_argumentos);
+        return -1;
+    }
+
+    if (necesita_resultado && funcion->valor != NULL &&
+        strcmp(funcion->valor, "vacio") == 0) {
+        error_codegen(cg, nodo,
+                      "la funcion vacia '%s' no produce un valor",
+                      nodo->valor);
+        return -1;
+    }
+
+    asm_emitir_comentario(&cg->emisor, "llamada a %s", nodo->valor);
+
+    /*
+     * Preservar todos los temporales del llamador. Es conservador, pero
+     * garantiza expresiones como a + f(b), porque el cuerpo de f puede usar
+     * los mismos x4-x12. Tambien se preserva x14 para llamadas anidadas.
+     */
+    for (reg = REG_TEMP_PRIMERO; reg <= REG_TEMP_ULTIMO; reg++) {
+        if (!emitir_instruccion(cg, "ALU",
+                                "ADDI x%d, x%d, -4", REG_SP, REG_SP) ||
+            !emitir_instruccion(cg, "LSU",
+                                "STORE x%d, 0(x%d)", reg, REG_SP))
+            return -1;
+    }
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, -4", REG_SP, REG_SP) ||
+        !emitir_instruccion(cg, "LSU",
+                            "STORE x%d, 0(x%d)",
+                            REG_RETORNO_DIRECCION, REG_SP))
+        return -1;
+
+    /* Evaluar y copiar los parametros escalares del callee. */
+    while (parametro != NULL && argumento != NULL) {
+        id_parametro = hijo_n(parametro, 0);
+
+        if (id_parametro == NULL || id_parametro->tipo != AST_VARIABLE ||
+            id_parametro->valor == NULL) {
+            error_codegen(cg, parametro,
+                          "parametro de funcion sin identificador valido");
+            return -1;
+        }
+
+        if (parametro->valor != NULL &&
+            (strstr(parametro->valor, "lista") != NULL ||
+             strstr(parametro->valor, "matriz") != NULL)) {
+            error_codegen(cg, parametro,
+                          "parametros lista/matriz aun requieren convencion por referencia");
+            return -1;
+        }
+
+        reg = generar_expresion(cg, argumento);
+        if (reg < 0)
+            return -1;
+
+        if (!guardar_variable(cg, id_parametro,
+                              id_parametro->valor, reg)) {
+            liberar_temp(cg, reg);
+            return -1;
+        }
+
+        liberar_temp(cg, reg);
+        parametro = parametro->siguiente;
+        argumento = argumento->siguiente;
+    }
+
+    /*
+     * La instruccion que calcula x14 y el JMP tienen cada una N NOPs.
+     * x1 contiene el PC del bundle ADDI; por eso la continuacion esta a:
+     *     2 * (1 + N) bundles * 16 bytes.
+     */
+    delta_retorno = (int)(2u * (1u + cg->config.nops_dependencia) * 16u);
+    if (delta_retorno > 2047) {
+        error_codegen(cg, nodo,
+                      "la separacion configurada hace que el retorno no quepa en ADDI");
+        return -1;
+    }
+
+    snprintf(etiqueta_funcion, sizeof(etiqueta_funcion),
+             "func_%s", nodo->valor);
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x1, %d",
+                            REG_RETORNO_DIRECCION, delta_retorno) ||
+        !emitir_instruccion(cg, "BRU",
+                            "JMP %s", etiqueta_funcion))
+        return -1;
+
+    /* Al regresar, x15 contiene el valor. Restaurar x14 y temporales. */
+    if (!emitir_instruccion(cg, "LSU",
+                            "LOAD x%d, 0(x%d)",
+                            REG_RETORNO_DIRECCION, REG_SP) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, 4", REG_SP, REG_SP))
+        return -1;
+
+    for (reg = REG_TEMP_ULTIMO; reg >= REG_TEMP_PRIMERO; reg--) {
+        if (!emitir_instruccion(cg, "LSU",
+                                "LOAD x%d, 0(x%d)", reg, REG_SP) ||
+            !emitir_instruccion(cg, "ALU",
+                                "ADDI x%d, x%d, 4", REG_SP, REG_SP))
+            return -1;
+    }
+
+    if (!necesita_resultado)
+        return 0;
+
+    reg_resultado = reservar_temp(cg, nodo);
+    if (reg_resultado < 0)
+        return -1;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x0, x%d",
+                            reg_resultado, REG_RETORNO_VALOR)) {
+        liberar_temp(cg, reg_resultado);
+        return -1;
+    }
+
+    return reg_resultado;
+}
+
 static int generar_expresion(Codegen *cg, NodoAST *nodo)
 {
     int izq, der, reg;
@@ -1288,6 +1517,9 @@ static int generar_expresion(Codegen *cg, NodoAST *nodo)
     case AST_ACCESO_LISTA:
     case AST_ACCESO_MATRIZ:
         return cargar_acceso(cg, nodo);
+
+    case AST_LLAMADA:
+        return generar_llamada(cg, nodo, 1);
 
     case AST_OPERACION:
         if (strcmp(nodo->valor, "unario -") == 0) {
@@ -1398,7 +1630,7 @@ static void generar_declaracion(Codegen *cg, NodoAST *nodo)
     if (reg < 0)
         return;
 
-    guardar_variable(cg, nodo, variable->valor, reg);
+    guardar_variable(cg, variable, variable->valor, reg);
     liberar_temp(cg, reg);
 }
 
@@ -1423,7 +1655,7 @@ static void generar_asignacion(Codegen *cg, NodoAST *nodo)
         return;
 
     if (destino->tipo == AST_VARIABLE) {
-        guardar_variable(cg, nodo, destino->valor, reg);
+        guardar_variable(cg, destino, destino->valor, reg);
     } else if (destino->tipo == AST_ACCESO_LISTA ||
                destino->tipo == AST_ACCESO_MATRIZ) {
         guardar_acceso(cg, destino, reg);
@@ -1783,6 +2015,161 @@ static void generar_break(Codegen *cg, NodoAST *nodo)
     emitir_instruccion(cg, "BRU", "JMP %s", destino);
 }
 
+static void generar_return(Codegen *cg, NodoAST *nodo)
+{
+    NodoAST *expresion;
+    int reg;
+
+    if (!cg->dentro_funcion) {
+        error_codegen(cg, nodo,
+                      "'devuelva' solo puede utilizarse dentro de una funcion");
+        return;
+    }
+
+    expresion = hijo_n(nodo, 0);
+    if (expresion == NULL) {
+        error_codegen(cg, nodo, "devuelva sin expresion");
+        return;
+    }
+
+    reg = generar_expresion(cg, expresion);
+    if (reg < 0)
+        return;
+
+    asm_emitir_comentario(&cg->emisor,
+                          "devuelva de %s",
+                          cg->funcion_actual != NULL
+                              ? cg->funcion_actual : "funcion");
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x0, x%d",
+                            REG_RETORNO_VALOR, reg) ||
+        !emitir_instruccion(cg, "BRU",
+                            "JMP %s", cg->etiqueta_retorno_funcion)) {
+        liberar_temp(cg, reg);
+        return;
+    }
+
+    liberar_temp(cg, reg);
+}
+
+static void generar_funcion(Codegen *cg, NodoAST *nodo)
+{
+    NodoAST *nombre = hijo_n(nodo, 0);
+    NodoAST *bloque = hijo_n(nodo, 2);
+    const char *funcion_anterior;
+    int dentro_anterior;
+    char retorno_anterior[96];
+    char etiqueta_funcion[160];
+    char etiqueta_retorno[96];
+
+    if (nombre == NULL || nombre->tipo != AST_VARIABLE ||
+        nombre->valor == NULL || bloque == NULL) {
+        error_codegen(cg, nodo, "definicion de funcion incompleta");
+        return;
+    }
+
+    snprintf(etiqueta_funcion, sizeof(etiqueta_funcion),
+             "func_%s", nombre->valor);
+    snprintf(etiqueta_retorno, sizeof(etiqueta_retorno),
+             "ret_%s", nombre->valor);
+
+    asm_emitir_comentario(&cg->emisor,
+                          "funcion %s -> retorno en x%d",
+                          nombre->valor, REG_RETORNO_VALOR);
+    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_funcion)) {
+        cg->errores++;
+        return;
+    }
+
+    /* Valor definido incluso si el semantico deja pasar un camino sin return. */
+    if (!emitir_constante(cg, REG_RETORNO_VALOR, 0))
+        return;
+
+    funcion_anterior = cg->funcion_actual;
+    dentro_anterior = cg->dentro_funcion;
+    snprintf(retorno_anterior, sizeof(retorno_anterior), "%s",
+             cg->etiqueta_retorno_funcion);
+
+    cg->funcion_actual = nombre->valor;
+    cg->dentro_funcion = 1;
+    snprintf(cg->etiqueta_retorno_funcion,
+             sizeof(cg->etiqueta_retorno_funcion),
+             "%s", etiqueta_retorno);
+
+    generar_nodo(cg, bloque);
+
+    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_retorno)) {
+        cg->errores++;
+    } else {
+        /* RET por software: escribir x1 redirige el PC en el hardware real. */
+        emitir_instruccion(cg, "ALU",
+                           "ADD x1, x%d, x0", REG_RETORNO_DIRECCION);
+    }
+
+    cg->funcion_actual = funcion_anterior;
+    cg->dentro_funcion = dentro_anterior;
+    snprintf(cg->etiqueta_retorno_funcion,
+             sizeof(cg->etiqueta_retorno_funcion),
+             "%s", retorno_anterior);
+}
+
+static void generar_principal(Codegen *cg, NodoAST *nodo)
+{
+    cg->encontro_principal = 1;
+
+    if (!asm_emitir_etiqueta(&cg->emisor, "principal")) {
+        cg->errores++;
+        return;
+    }
+
+    cg->funcion_actual = "principal";
+    cg->dentro_funcion = 0;
+
+    generar_nodo(cg, hijo_n(nodo, 0));
+
+    /* principal no retorna a un llamador: termina en el lazo final. */
+    emitir_instruccion(cg, "BRU", "JMP fin_programa");
+}
+
+static void generar_programa(Codegen *cg, NodoAST *nodo)
+{
+    NodoAST *actual;
+    uint32_t pila_inicial = PILA_INICIAL_DEFECTO;
+
+    asm_emitir_comentario(&cg->emisor,
+                          "inicio: x2=SP, x14=retorno, x15=valor de retorno");
+    if (!emitir_constante(cg, REG_SP, (int32_t)pila_inicial) ||
+        !emitir_constante(cg, REG_RETORNO_DIRECCION, 0))
+        return;
+
+    /* Primera pasada: inicializaciones globales antes de saltar a principal. */
+    for (actual = nodo->hijo; actual != NULL; actual = actual->siguiente) {
+        if (actual->tipo != AST_FUNCION &&
+            actual->tipo != AST_PRINCIPAL &&
+            actual->tipo != AST_IMPORTACION)
+            generar_nodo(cg, actual);
+    }
+
+    /* Nunca se debe caer secuencialmente dentro de una funcion. */
+    if (!emitir_instruccion(cg, "BRU", "JMP principal"))
+        return;
+
+    /* Segunda pasada: cuerpos de funciones. */
+    for (actual = nodo->hijo; actual != NULL; actual = actual->siguiente) {
+        if (actual->tipo == AST_FUNCION)
+            generar_funcion(cg, actual);
+    }
+
+    /* Tercera pasada: punto de entrada. */
+    for (actual = nodo->hijo; actual != NULL; actual = actual->siguiente) {
+        if (actual->tipo == AST_PRINCIPAL) {
+            generar_principal(cg, actual);
+            break;
+        }
+    }
+}
+
 static void generar_nodo(Codegen *cg, NodoAST *nodo)
 {
     if (nodo == NULL)
@@ -1790,7 +2177,7 @@ static void generar_nodo(Codegen *cg, NodoAST *nodo)
 
     switch (nodo->tipo) {
     case AST_PROGRAMA:
-        generar_lista_hermanos(cg, nodo->hijo);
+        generar_programa(cg, nodo);
         break;
 
     case AST_BLOQUE:
@@ -1798,9 +2185,7 @@ static void generar_nodo(Codegen *cg, NodoAST *nodo)
         break;
 
     case AST_PRINCIPAL:
-        cg->encontro_principal = 1;
-        asm_emitir_etiqueta(&cg->emisor, "principal");
-        generar_nodo(cg, hijo_n(nodo, 0));
+        generar_principal(cg, nodo);
         break;
 
     case AST_DECLARACION:
@@ -1840,11 +2225,16 @@ static void generar_nodo(Codegen *cg, NodoAST *nodo)
         break;
 
     case AST_FUNCION:
+        generar_funcion(cg, nodo);
+        break;
+
     case AST_RETURN:
+        generar_return(cg, nodo);
+        break;
+
     case AST_LLAMADA:
-        asm_emitir_comentario(&cg->emisor,
-                              "TODO Fase 4: nodo tipo %d linea %d",
-                              (int)nodo->tipo, nodo->linea);
+        if (generar_llamada(cg, nodo, 0) < 0)
+            return;
         break;
 
     default:
@@ -1864,6 +2254,7 @@ int codegen_generar_archivo(NodoAST *raiz,
 
     memset(&cg, 0, sizeof(cg));
     cg.config = *config;
+    cg.raiz = raiz;
 
     if (cg.config.nops_dependencia == 0)
         cg.config.nops_dependencia = NOPS_POR_DEFECTO;
