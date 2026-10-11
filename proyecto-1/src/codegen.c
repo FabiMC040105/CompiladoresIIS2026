@@ -486,6 +486,554 @@ static int generar_booleano_desde_condicion(Codegen *cg, NodoAST *nodo)
     return reg;
 }
 
+
+/*
+ * Multiplicacion entera de 32 bits implementada unicamente con
+ * instrucciones que existen en la ISA del procesador.
+ *
+ * Se usa el algoritmo shift-and-add:
+ *   - normaliza el signo de ambos operandos,
+ *   - recorre los bits del multiplicador,
+ *   - suma el multiplicando cuando el bit menos significativo es 1,
+ *   - desplaza multiplicando a la izquierda y multiplicador a la derecha.
+ *
+ * El ciclo termina cuando el multiplicador llega a cero, por lo que
+ * requiere como maximo 32 iteraciones para operandos de 32 bits.
+ * El resultado conserva la semantica modular de 32 bits del hardware.
+ *
+ * Entradas:
+ *   reg_izq -> multiplicando temporal
+ *   reg_der -> multiplicador temporal
+ *
+ * Ambos registros pueden modificarse porque contienen temporales del
+ * generador, no las variables originales almacenadas en memoria.
+ *
+ * Devuelve un nuevo registro temporal con el producto o -1 en error.
+ */
+static int generar_multiplicacion(Codegen *cg,
+                                  NodoAST *nodo,
+                                  int reg_izq,
+                                  int reg_der)
+{
+    int reg_resultado;
+    int reg_signos;
+    int reg_uno;
+    int reg_bit;
+    char etq_izq_positivo[64];
+    char etq_der_positivo[64];
+    char etq_bucle[64];
+    char etq_sin_suma[64];
+    char etq_fin_bucle[64];
+    char etq_fin_signo[64];
+
+    reg_resultado = reservar_temp(cg, nodo);
+    reg_signos = reservar_temp(cg, nodo);
+    reg_uno = reservar_temp(cg, nodo);
+    reg_bit = reservar_temp(cg, nodo);
+
+    if (reg_resultado < 0 || reg_signos < 0 ||
+        reg_uno < 0 || reg_bit < 0) {
+        liberar_temp(cg, reg_resultado);
+        liberar_temp(cg, reg_signos);
+        liberar_temp(cg, reg_uno);
+        liberar_temp(cg, reg_bit);
+        return -1;
+    }
+
+    nueva_etiqueta(cg, "mul_izq_positivo",
+                   etq_izq_positivo, sizeof(etq_izq_positivo));
+    nueva_etiqueta(cg, "mul_der_positivo",
+                   etq_der_positivo, sizeof(etq_der_positivo));
+    nueva_etiqueta(cg, "mul_bucle",
+                   etq_bucle, sizeof(etq_bucle));
+    nueva_etiqueta(cg, "mul_sin_suma",
+                   etq_sin_suma, sizeof(etq_sin_suma));
+    nueva_etiqueta(cg, "mul_fin_bucle",
+                   etq_fin_bucle, sizeof(etq_fin_bucle));
+    nueva_etiqueta(cg, "mul_fin_signo",
+                   etq_fin_signo, sizeof(etq_fin_signo));
+
+    asm_emitir_comentario(&cg->emisor,
+                          "multiplicacion por software: shift-and-add");
+
+    if (!emitir_constante(cg, reg_resultado, 0) ||
+        !emitir_constante(cg, reg_signos, 0) ||
+        !emitir_constante(cg, reg_uno, 1))
+        goto error;
+
+    /*
+     * Convertir el operando izquierdo a magnitud positiva.
+     * reg_signos cuenta cuantos operandos eran negativos: 0, 1 o 2.
+     */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BGE x%d, x0, %s",
+                            reg_izq, etq_izq_positivo))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x0, x%d",
+                            reg_izq, reg_izq) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, 1",
+                            reg_signos, reg_signos) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_izq_positivo))
+        goto error;
+
+    /* Convertir el operando derecho a magnitud positiva. */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BGE x%d, x0, %s",
+                            reg_der, etq_der_positivo))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x0, x%d",
+                            reg_der, reg_der) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, 1",
+                            reg_signos, reg_signos) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_der_positivo))
+        goto error;
+
+    /*
+     * Bucle principal.
+     *
+     * while (reg_der != 0) {
+     *     if (reg_der & 1)
+     *         resultado += reg_izq;
+     *     reg_izq <<= 1;
+     *     reg_der >>= 1;
+     * }
+     */
+    if (!asm_emitir_etiqueta(&cg->emisor, etq_bucle))
+        goto error;
+
+    if (!emitir_instruccion(cg, "BRU",
+                            "BEQ x%d, x0, %s",
+                            reg_der, etq_fin_bucle))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "AND x%d, x%d, x%d",
+                            reg_bit, reg_der, reg_uno))
+        goto error;
+
+    if (!emitir_instruccion(cg, "BRU",
+                            "BEQ x%d, x0, %s",
+                            reg_bit, etq_sin_suma))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x%d, x%d",
+                            reg_resultado, reg_resultado, reg_izq))
+        goto error;
+
+    if (!asm_emitir_etiqueta(&cg->emisor, etq_sin_suma))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SLLI x%d, x%d, 1",
+                            reg_izq, reg_izq) ||
+        !emitir_instruccion(cg, "ALU",
+                            "SRLI x%d, x%d, 1",
+                            reg_der, reg_der) ||
+        !emitir_instruccion(cg, "BRU",
+                            "JMP %s", etq_bucle) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_fin_bucle))
+        goto error;
+
+    /*
+     * Solo un operando negativo => producto negativo.
+     * Con cero o dos operandos negativos el resultado ya tiene
+     * el signo correcto.
+     */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BNE x%d, x%d, %s",
+                            reg_signos, reg_uno, etq_fin_signo))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x0, x%d",
+                            reg_resultado, reg_resultado) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_fin_signo))
+        goto error;
+
+    liberar_temp(cg, reg_izq);
+    liberar_temp(cg, reg_der);
+    liberar_temp(cg, reg_signos);
+    liberar_temp(cg, reg_uno);
+    liberar_temp(cg, reg_bit);
+
+    return reg_resultado;
+
+error:
+    liberar_temp(cg, reg_izq);
+    liberar_temp(cg, reg_der);
+    liberar_temp(cg, reg_resultado);
+    liberar_temp(cg, reg_signos);
+    liberar_temp(cg, reg_uno);
+    liberar_temp(cg, reg_bit);
+    return -1;
+}
+
+
+/*
+ * Division y modulo enteros con signo implementados sin DIV/MOD.
+ *
+ * El ISA no posee instrucciones nativas de division. Para esta primera
+ * version se usa resta repetida sobre las magnitudes de los operandos:
+ *
+ *     cociente = 0;
+ *     mientras (dividendo >= divisor) {
+ *         dividendo -= divisor;
+ *         cociente++;
+ *     }
+ *
+ * Al terminar, el dividendo contiene el residuo. Luego se restauran
+ * los signos con semantica tipo C: el cociente se trunca hacia cero y
+ * el residuo conserva el signo del dividendo original.
+ *
+ * Si el divisor vale cero en tiempo de ejecucion, esta primera version
+ * evita un ciclo infinito y produce cociente 0 y residuo igual al
+ * dividendo original. El analisis semantico puede rechazar los casos
+ * constantes de division entre cero antes de llegar a Fase 4.
+ *
+ * devolver_resto == 0 -> devuelve cociente (/)
+ * devolver_resto != 0 -> devuelve residuo (%)
+ */
+static int generar_division_modulo(Codegen *cg,
+                                    NodoAST *nodo,
+                                    int reg_izq,
+                                    int reg_der,
+                                    int devolver_resto)
+{
+    int reg_cociente;
+    int reg_signos;
+    int reg_uno;
+    int reg_dividendo_negativo;
+    int reg_resultado;
+    char etq_izq_positivo[64];
+    char etq_der_positivo[64];
+    char etq_divisor_valido[64];
+    char etq_bucle[64];
+    char etq_restar[64];
+    char etq_fin_bucle[64];
+    char etq_fin_signo_cociente[64];
+    char etq_fin_signo_resto[64];
+
+    reg_cociente = reservar_temp(cg, nodo);
+    reg_signos = reservar_temp(cg, nodo);
+    reg_uno = reservar_temp(cg, nodo);
+    reg_dividendo_negativo = reservar_temp(cg, nodo);
+
+    if (reg_cociente < 0 || reg_signos < 0 ||
+        reg_uno < 0 || reg_dividendo_negativo < 0) {
+        liberar_temp(cg, reg_izq);
+        liberar_temp(cg, reg_der);
+        liberar_temp(cg, reg_cociente);
+        liberar_temp(cg, reg_signos);
+        liberar_temp(cg, reg_uno);
+        liberar_temp(cg, reg_dividendo_negativo);
+        return -1;
+    }
+
+    nueva_etiqueta(cg, "div_izq_positivo",
+                   etq_izq_positivo, sizeof(etq_izq_positivo));
+    nueva_etiqueta(cg, "div_der_positivo",
+                   etq_der_positivo, sizeof(etq_der_positivo));
+    nueva_etiqueta(cg, "div_divisor_valido",
+                   etq_divisor_valido, sizeof(etq_divisor_valido));
+    nueva_etiqueta(cg, "div_bucle",
+                   etq_bucle, sizeof(etq_bucle));
+    nueva_etiqueta(cg, "div_restar",
+                   etq_restar, sizeof(etq_restar));
+    nueva_etiqueta(cg, "div_fin_bucle",
+                   etq_fin_bucle, sizeof(etq_fin_bucle));
+    nueva_etiqueta(cg, "div_fin_signo_cociente",
+                   etq_fin_signo_cociente,
+                   sizeof(etq_fin_signo_cociente));
+    nueva_etiqueta(cg, "div_fin_signo_resto",
+                   etq_fin_signo_resto,
+                   sizeof(etq_fin_signo_resto));
+
+    asm_emitir_comentario(&cg->emisor,
+                          devolver_resto
+                              ? "modulo por software: resta repetida"
+                              : "division por software: resta repetida");
+
+    if (!emitir_constante(cg, reg_cociente, 0) ||
+        !emitir_constante(cg, reg_signos, 0) ||
+        !emitir_constante(cg, reg_uno, 1) ||
+        !emitir_constante(cg, reg_dividendo_negativo, 0))
+        goto error;
+
+    /* Normalizar el dividendo y recordar su signo para el residuo. */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BGE x%d, x0, %s",
+                            reg_izq, etq_izq_positivo))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x0, x%d",
+                            reg_izq, reg_izq) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, 1",
+                            reg_signos, reg_signos) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x0, 1",
+                            reg_dividendo_negativo) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_izq_positivo))
+        goto error;
+
+    /* Normalizar el divisor y acumular la paridad de signos. */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BGE x%d, x0, %s",
+                            reg_der, etq_der_positivo))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x0, x%d",
+                            reg_der, reg_der) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, 1",
+                            reg_signos, reg_signos) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_der_positivo))
+        goto error;
+
+    /* Evitar division entre cero en tiempo de ejecucion. */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BNE x%d, x0, %s",
+                            reg_der, etq_divisor_valido))
+        goto error;
+
+    asm_emitir_comentario(&cg->emisor,
+                          "division entre cero: cociente=0, resto=dividendo");
+    if (!emitir_instruccion(cg, "BRU", "JMP %s", etq_fin_bucle) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_divisor_valido))
+        goto error;
+
+    /*
+     * while (dividendo >= divisor) {
+     *     dividendo -= divisor;
+     *     cociente += 1;
+     * }
+     */
+    if (!asm_emitir_etiqueta(&cg->emisor, etq_bucle))
+        goto error;
+
+    if (!emitir_instruccion(cg, "BRU",
+                            "BGE x%d, x%d, %s",
+                            reg_izq, reg_der, etq_restar) ||
+        !emitir_instruccion(cg, "BRU",
+                            "JMP %s", etq_fin_bucle) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_restar))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x%d, x%d",
+                            reg_izq, reg_izq, reg_der) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, 1",
+                            reg_cociente, reg_cociente) ||
+        !emitir_instruccion(cg, "BRU",
+                            "JMP %s", etq_bucle) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_fin_bucle))
+        goto error;
+
+    /* Un solo operando negativo => cociente negativo. */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BNE x%d, x%d, %s",
+                            reg_signos, reg_uno,
+                            etq_fin_signo_cociente))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x0, x%d",
+                            reg_cociente, reg_cociente) ||
+        !asm_emitir_etiqueta(&cg->emisor,
+                             etq_fin_signo_cociente))
+        goto error;
+
+    /* El residuo conserva el signo del dividendo original. */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BNE x%d, x%d, %s",
+                            reg_dividendo_negativo, reg_uno,
+                            etq_fin_signo_resto))
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "SUB x%d, x0, x%d",
+                            reg_izq, reg_izq) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_fin_signo_resto))
+        goto error;
+
+    if (devolver_resto) {
+        reg_resultado = reg_izq;
+        liberar_temp(cg, reg_cociente);
+    } else {
+        reg_resultado = reg_cociente;
+        liberar_temp(cg, reg_izq);
+    }
+
+    liberar_temp(cg, reg_der);
+    liberar_temp(cg, reg_signos);
+    liberar_temp(cg, reg_uno);
+    liberar_temp(cg, reg_dividendo_negativo);
+
+    return reg_resultado;
+
+error:
+    liberar_temp(cg, reg_izq);
+    liberar_temp(cg, reg_der);
+    liberar_temp(cg, reg_cociente);
+    liberar_temp(cg, reg_signos);
+    liberar_temp(cg, reg_uno);
+    liberar_temp(cg, reg_dividendo_negativo);
+    return -1;
+}
+
+
+/*
+ * Potencia entera implementada exclusivamente con instrucciones del ISA.
+ *
+ * No existe POW en el procesador. Para exponentes enteros no negativos
+ * se usa multiplicacion repetida:
+ *
+ *     resultado = 1;
+ *     mientras (exponente > 0) {
+ *         resultado = resultado * base;
+ *         exponente--;
+ *     }
+ *
+ * Cada producto se baja, a su vez, mediante generar_multiplicacion(),
+ * que implementa shift-and-add con ADD/AND/SLLI/SRLI y saltos BRU.
+ *
+ * Un exponente igual a cero produce 1. Los exponentes negativos no son
+ * representables de forma general con el tipo entero del lenguaje; el
+ * analisis semantico debe rechazarlos cuando pueda determinarlos. Como
+ * proteccion de ejecucion, si un exponente negativo llega al backend se
+ * produce 0 y se evita un ciclo infinito.
+ *
+ * generar_potencia consume reg_base y reg_exponente y devuelve un nuevo
+ * temporal con el resultado, o -1 si ocurre un error de generacion.
+ */
+static int generar_potencia(Codegen *cg,
+                            NodoAST *nodo,
+                            int reg_base,
+                            int reg_exponente)
+{
+    int reg_resultado;
+    int reg_copia_resultado;
+    int reg_copia_base;
+    int reg_producto;
+    char etq_exponente_valido[64];
+    char etq_bucle[64];
+    char etq_fin[64];
+
+    reg_resultado = reservar_temp(cg, nodo);
+    if (reg_resultado < 0) {
+        liberar_temp(cg, reg_base);
+        liberar_temp(cg, reg_exponente);
+        return -1;
+    }
+
+    nueva_etiqueta(cg, "pow_exponente_valido",
+                   etq_exponente_valido, sizeof(etq_exponente_valido));
+    nueva_etiqueta(cg, "pow_bucle",
+                   etq_bucle, sizeof(etq_bucle));
+    nueva_etiqueta(cg, "pow_fin",
+                   etq_fin, sizeof(etq_fin));
+
+    asm_emitir_comentario(&cg->emisor,
+                          "potencia por software: multiplicacion repetida");
+
+    /* resultado = 1, de modo que base ** 0 == 1. */
+    if (!emitir_constante(cg, reg_resultado, 1))
+        goto error;
+
+    /*
+     * Exponentes negativos no tienen una representacion entera general.
+     * El semantico deberia rechazarlos; esta rama evita un ciclo infinito
+     * si el valor negativo solo se conoce en tiempo de ejecucion.
+     */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BGE x%d, x0, %s",
+                            reg_exponente, etq_exponente_valido))
+        goto error;
+
+    asm_emitir_comentario(&cg->emisor,
+                          "exponente negativo no soportado: resultado=0");
+    if (!emitir_constante(cg, reg_resultado, 0) ||
+        !emitir_instruccion(cg, "BRU", "JMP %s", etq_fin) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_exponente_valido))
+        goto error;
+
+    if (!asm_emitir_etiqueta(&cg->emisor, etq_bucle))
+        goto error;
+
+    /* while (exponente != 0) */
+    if (!emitir_instruccion(cg, "BRU",
+                            "BEQ x%d, x0, %s",
+                            reg_exponente, etq_fin))
+        goto error;
+
+    /*
+     * generar_multiplicacion modifica sus dos operandos al normalizar
+     * signos y desplazar bits. Por eso copiamos resultado y base antes
+     * de emitir la rutina; los registros persistentes se conservan para
+     * la siguiente iteracion de la potencia.
+     */
+    reg_copia_resultado = reservar_temp(cg, nodo);
+    reg_copia_base = reservar_temp(cg, nodo);
+    if (reg_copia_resultado < 0 || reg_copia_base < 0) {
+        liberar_temp(cg, reg_copia_resultado);
+        liberar_temp(cg, reg_copia_base);
+        goto error;
+    }
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x0, x%d",
+                            reg_copia_resultado, reg_resultado) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x0, x%d",
+                            reg_copia_base, reg_base)) {
+        liberar_temp(cg, reg_copia_resultado);
+        liberar_temp(cg, reg_copia_base);
+        goto error;
+    }
+
+    reg_producto = generar_multiplicacion(cg, nodo,
+                                          reg_copia_resultado,
+                                          reg_copia_base);
+    if (reg_producto < 0)
+        goto error;
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x0, x%d",
+                            reg_resultado, reg_producto)) {
+        liberar_temp(cg, reg_producto);
+        goto error;
+    }
+    liberar_temp(cg, reg_producto);
+
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADDI x%d, x%d, -1",
+                            reg_exponente, reg_exponente) ||
+        !emitir_instruccion(cg, "BRU", "JMP %s", etq_bucle) ||
+        !asm_emitir_etiqueta(&cg->emisor, etq_fin))
+        goto error;
+
+    liberar_temp(cg, reg_base);
+    liberar_temp(cg, reg_exponente);
+    return reg_resultado;
+
+error:
+    liberar_temp(cg, reg_base);
+    liberar_temp(cg, reg_exponente);
+    liberar_temp(cg, reg_resultado);
+    return -1;
+}
+
+
 static int generar_expresion(Codegen *cg, NodoAST *nodo)
 {
     int izq, der, reg;
@@ -567,7 +1115,24 @@ static int generar_expresion(Codegen *cg, NodoAST *nodo)
         else if (strcmp(nodo->valor, "-") == 0)
             reg = emitir_instruccion(cg, "ALU",
                                      "SUB x%d, x%d, x%d", izq, izq, der);
-        else {
+        else if (strcmp(nodo->valor, "*") == 0) {
+            /*
+             * El ISA no tiene MUL. No se inventa una instruccion nueva:
+             * se baja la operacion a una secuencia de ADD/AND/shifts/BRU.
+             * generar_multiplicacion libera izq y der y devuelve el
+             * registro que contiene el producto.
+             */
+            return generar_multiplicacion(cg, nodo, izq, der);
+        } else if (strcmp(nodo->valor, "/") == 0) {
+            /* El ISA tampoco tiene DIV: division entera por software. */
+            return generar_division_modulo(cg, nodo, izq, der, 0);
+        } else if (strcmp(nodo->valor, "%") == 0) {
+            /* El residuo sale del mismo algoritmo de division. */
+            return generar_division_modulo(cg, nodo, izq, der, 1);
+        } else if (strcmp(nodo->valor, "**") == 0) {
+            /* El ISA no tiene POW: potencia entera por software. */
+            return generar_potencia(cg, nodo, izq, der);
+        } else {
             error_codegen(cg, nodo,
                           "operador '%s' aun no implementado en Fase 4",
                           nodo->valor);

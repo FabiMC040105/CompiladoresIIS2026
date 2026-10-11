@@ -1,0 +1,218 @@
+#include "ast.h"
+#include "codegen.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* ast.c usa yylineno al crear nodos. En este test no usamos Flex. */
+int yylineno = 1;
+
+typedef struct {
+    const char *nombre;
+    unsigned direccion;
+    const char *tipo;
+} SimboloPrueba;
+
+static const SimboloPrueba simbolos[] = {
+    {"a", 0, "entero"},
+    {"b", 4, "entero"},
+    {"q", 8, "entero"},
+    {"r", 12, "entero"},
+    {"qn", 16, "entero"},
+    {"rn", 20, "entero"}
+};
+
+static int resolver_prueba(void *contexto,
+                           const char *nombre,
+                           CodegenSimbolo *salida)
+{
+    size_t i;
+    (void)contexto;
+
+    for (i = 0; i < sizeof(simbolos) / sizeof(simbolos[0]); i++) {
+        if (strcmp(simbolos[i].nombre, nombre) == 0) {
+            salida->nombre = simbolos[i].nombre;
+            salida->direccion = simbolos[i].direccion;
+            salida->tipo = simbolos[i].tipo;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static NodoAST *op(const char *operador, NodoAST *izq, NodoAST *der)
+{
+    NodoAST *n = ast_crear(AST_OPERACION, operador);
+    ast_agregar_hijo(n, izq);
+    if (der != NULL)
+        ast_agregar_hijo(n, der);
+    return n;
+}
+
+static NodoAST *var(const char *nombre)
+{
+    return ast_crear(AST_VARIABLE, nombre);
+}
+
+static NodoAST *num(const char *valor)
+{
+    return ast_crear(AST_NUMERO, valor);
+}
+
+static NodoAST *neg(NodoAST *valor)
+{
+    return op("unario -", valor, NULL);
+}
+
+static NodoAST *declaracion(const char *nombre, NodoAST *expresion)
+{
+    NodoAST *n = ast_crear(AST_DECLARACION, "entero");
+    ast_agregar_hijo(n, var(nombre));
+    if (expresion != NULL)
+        ast_agregar_hijo(n, expresion);
+    return n;
+}
+
+static NodoAST *crear_programa_prueba(void)
+{
+    NodoAST *programa = ast_crear(AST_PROGRAMA, "programa");
+    NodoAST *principal = ast_crear(AST_PRINCIPAL, "principal");
+    NodoAST *cuerpo = ast_crear(AST_BLOQUE, "bloque");
+
+    /*
+     * entero a = 17 :)
+     * entero b = 5 :)
+     * entero q = a / b :)      -> 3
+     * entero r = a % b :)      -> 2
+     * entero qn = -17 / b :)   -> -3
+     * entero rn = -17 % b :)   -> -2 (semantica tipo C)
+     */
+    ast_agregar_hijo(cuerpo, declaracion("a", num("17")));
+    ast_agregar_hijo(cuerpo, declaracion("b", num("5")));
+    ast_agregar_hijo(cuerpo,
+                     declaracion("q", op("/", var("a"), var("b"))));
+    ast_agregar_hijo(cuerpo,
+                     declaracion("r", op("%", var("a"), var("b"))));
+    ast_agregar_hijo(cuerpo,
+                     declaracion("qn", op("/", neg(num("17")), var("b"))));
+    ast_agregar_hijo(cuerpo,
+                     declaracion("rn", op("%", neg(num("17")), var("b"))));
+
+    ast_agregar_hijo(principal, cuerpo);
+    ast_agregar_hijo(programa, principal);
+    return programa;
+}
+
+static char *leer_archivo(const char *ruta)
+{
+    FILE *f;
+    long tamano;
+    char *contenido;
+
+    f = fopen(ruta, "rb");
+    if (f == NULL)
+        return NULL;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+
+    tamano = ftell(f);
+    if (tamano < 0) {
+        fclose(f);
+        return NULL;
+    }
+
+    rewind(f);
+    contenido = malloc((size_t)tamano + 1);
+    if (contenido == NULL) {
+        fclose(f);
+        return NULL;
+    }
+
+    if (fread(contenido, 1, (size_t)tamano, f) != (size_t)tamano) {
+        free(contenido);
+        fclose(f);
+        return NULL;
+    }
+
+    contenido[tamano] = '\0';
+    fclose(f);
+    return contenido;
+}
+
+int main(void)
+{
+    NodoAST *raiz;
+    CodegenConfig config;
+    char *contenido;
+    int ok;
+    const char *salida = "salida_codegen_divmod.asm";
+
+    raiz = crear_programa_prueba();
+
+    config.resolver_simbolo = resolver_prueba;
+    config.contexto_simbolos = NULL;
+    config.nops_dependencia = 4;
+
+    ok = codegen_generar_archivo(raiz, salida, &config);
+    ast_liberar(raiz);
+
+    if (!ok) {
+        fprintf(stderr, "FAIL: el generador reporto errores.\n");
+        return 1;
+    }
+
+    contenido = leer_archivo(salida);
+    if (contenido == NULL) {
+        fprintf(stderr, "FAIL: no se pudo leer %s.\n", salida);
+        return 1;
+    }
+
+    /* Nunca deben aparecer instrucciones inexistentes DIV o MOD. */
+    if (strstr(contenido, "ALU: DIV") != NULL ||
+        strstr(contenido, "ALU: MOD") != NULL ||
+        strstr(contenido, " DIV ") != NULL ||
+        strstr(contenido, " MOD ") != NULL) {
+        fprintf(stderr, "FAIL: se emitio DIV/MOD como instruccion de hardware.\n");
+        free(contenido);
+        return 1;
+    }
+
+    if (strstr(contenido,
+               "# division por software: resta repetida") == NULL ||
+        strstr(contenido,
+               "# modulo por software: resta repetida") == NULL) {
+        fprintf(stderr, "FAIL: faltan las rutinas software de / o %%.\n");
+        free(contenido);
+        return 1;
+    }
+
+    if (strstr(contenido, "div_bucle_") == NULL ||
+        strstr(contenido, "div_restar_") == NULL ||
+        strstr(contenido, "ALU: SUB ") == NULL ||
+        strstr(contenido, "BRU: BGE ") == NULL ||
+        strstr(contenido, "ALU: ADDI ") == NULL) {
+        fprintf(stderr,
+                "FAIL: faltan instrucciones/etiquetas de la division software.\n");
+        free(contenido);
+        return 1;
+    }
+
+    if (strstr(contenido,
+               "# division entre cero: cociente=0, resto=dividendo") == NULL) {
+        fprintf(stderr, "FAIL: falta proteccion de division entre cero.\n");
+        free(contenido);
+        return 1;
+    }
+
+    free(contenido);
+
+    printf("PASS: '/' se traduce sin usar una instruccion DIV.\n");
+    printf("PASS: '%%' reutiliza la division y devuelve el residuo.\n");
+    printf("PASS: se genero proteccion ante divisor cero.\n");
+    printf("Salida: %s\n", salida);
+    return 0;
+}

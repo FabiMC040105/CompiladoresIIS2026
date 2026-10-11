@@ -1,0 +1,298 @@
+# Ensamblador intermedio generado por cdff
+# Cada instruccion emitida ocupa un bundle de 16 bytes
+principal:
+# declaracion a
+ALU: ADDI x4, x0, 7
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x4, x0, x4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# declaracion b
+ALU: ADDI x4, x0, 6
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# declaracion c
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x5, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# multiplicacion por software: shift-and-add
+ALU: ADDI x6, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x7, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x8, x0, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BGE x4, x0, mul_izq_positivo_0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x4, x0, x4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x7, x7, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_izq_positivo_0:
+BRU: BGE x5, x0, mul_der_positivo_1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x5, x0, x5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x7, x7, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_der_positivo_1:
+mul_bucle_2:
+BRU: BEQ x5, x0, mul_fin_bucle_4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: AND x9, x5, x8
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BEQ x9, x0, mul_sin_suma_3
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADD x6, x6, x4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_sin_suma_3:
+ALU: SLLI x4, x4, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SRLI x5, x5, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: JMP mul_bucle_2
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_fin_bucle_4:
+BRU: BNE x7, x8, mul_fin_signo_5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x6, x0, x6
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_fin_signo_5:
+ALU: ADDI x13, x0, 8
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# declaracion d
+ALU: ADDI x13, x0, 8
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 3
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x5, x0, x5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+# multiplicacion por software: shift-and-add
+ALU: ADDI x6, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x7, x0, 0
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x8, x0, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BGE x4, x0, mul_izq_positivo_6
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x4, x0, x4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x7, x7, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_izq_positivo_6:
+BRU: BGE x5, x0, mul_der_positivo_7
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x5, x0, x5
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADDI x7, x7, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_der_positivo_7:
+mul_bucle_8:
+BRU: BEQ x5, x0, mul_fin_bucle_10
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: AND x9, x5, x8
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: BEQ x9, x0, mul_sin_suma_9
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADD x6, x6, x4
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_sin_suma_9:
+ALU: SLLI x4, x4, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SRLI x5, x5, 1
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+BRU: JMP mul_bucle_8
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_fin_bucle_10:
+BRU: BNE x7, x8, mul_fin_signo_11
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: SUB x6, x0, x6
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+mul_fin_signo_11:
+ALU: ADDI x13, x0, 12
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: NOP
+fin_programa:
+BRU: JMP fin_programa
