@@ -12,6 +12,7 @@
 #define REG_DIRECCION 13
 #define NOPS_POR_DEFECTO 4
 #define MAX_NIVELES_BUCLE 32
+#define TAMANO_ELEMENTO_BYTES 4u
 
 typedef struct {
     AsmEmitter emisor;
@@ -204,6 +205,14 @@ static int resolver(Codegen *cg,
                       nombre);
         return 0;
     }
+
+    /*
+     * Inicializar los campos ampliados del contrato. Asi los resolvedores
+     * de las pruebas anteriores, que solo rellenan nombre/direccion/tipo,
+     * siguen representando correctamente un escalar.
+     */
+    memset(simbolo, 0, sizeof(*simbolo));
+    simbolo->forma = CODEGEN_FORMA_ESCALAR;
 
     if (!cg->config.resolver_simbolo(cg->config.contexto_simbolos,
                                      nombre,
@@ -1034,6 +1043,203 @@ error:
 }
 
 
+/*
+ * Calcula la direccion byte efectiva de un acceso a lista o matriz y la
+ * deja en x13 (REG_DIRECCION). Los enteros ocupan 4 bytes.
+ *
+ * lista[i]:      base + i * 4
+ * matriz[i][j]: base + ((i * columnas) + j) * 4
+ *
+ * La matriz se almacena en orden row-major. En esta primera version no se
+ * generan comprobaciones dinamicas de limites; esa validacion se deja al
+ * analisis semantico cuando los indices sean conocidos en compilacion.
+ */
+static int generar_direccion_acceso(Codegen *cg, NodoAST *nodo)
+{
+    NodoAST *variable;
+    CodegenSimbolo simbolo;
+    int reg_indice;
+
+    if (nodo == NULL ||
+        (nodo->tipo != AST_ACCESO_LISTA &&
+         nodo->tipo != AST_ACCESO_MATRIZ)) {
+        error_codegen(cg, nodo, "acceso a arreglo invalido");
+        return 0;
+    }
+
+    variable = hijo_n(nodo, 0);
+    if (variable == NULL || variable->tipo != AST_VARIABLE ||
+        variable->valor == NULL) {
+        error_codegen(cg, nodo, "acceso sin identificador valido");
+        return 0;
+    }
+
+    if (!resolver(cg, variable, variable->valor, &simbolo))
+        return 0;
+
+    if (nodo->tipo == AST_ACCESO_LISTA) {
+        if (simbolo.forma != CODEGEN_FORMA_LISTA ||
+            simbolo.cantidad_dimensiones < 1) {
+            error_codegen(cg, nodo, "'%s' no es una lista", variable->valor);
+            return 0;
+        }
+
+        reg_indice = generar_expresion(cg, hijo_n(nodo, 1));
+        if (reg_indice < 0)
+            return 0;
+
+        /* Cada entero ocupa 4 bytes: indice * 4 = indice << 2. */
+        if (!emitir_instruccion(cg, "ALU",
+                                "SLLI x%d, x%d, 2",
+                                reg_indice, reg_indice) ||
+            !emitir_constante(cg, REG_DIRECCION,
+                              (int32_t)simbolo.direccion) ||
+            !emitir_instruccion(cg, "ALU",
+                                "ADD x%d, x%d, x%d",
+                                REG_DIRECCION,
+                                REG_DIRECCION,
+                                reg_indice)) {
+            liberar_temp(cg, reg_indice);
+            return 0;
+        }
+
+        liberar_temp(cg, reg_indice);
+        return 1;
+    }
+
+    /* Matriz bidimensional en orden row-major. */
+    if (simbolo.forma != CODEGEN_FORMA_MATRIZ ||
+        simbolo.cantidad_dimensiones < 2 ||
+        simbolo.dimensiones[1] == 0) {
+        error_codegen(cg, nodo,
+                      "'%s' no tiene dimensiones de matriz resueltas",
+                      variable->valor);
+        return 0;
+    }
+
+    {
+        int reg_fila;
+        int reg_columna;
+        int reg_columnas;
+        int reg_lineal;
+
+        reg_fila = generar_expresion(cg, hijo_n(nodo, 1));
+        if (reg_fila < 0)
+            return 0;
+
+        reg_columna = generar_expresion(cg, hijo_n(nodo, 2));
+        if (reg_columna < 0) {
+            liberar_temp(cg, reg_fila);
+            return 0;
+        }
+
+        reg_columnas = reservar_temp(cg, nodo);
+        if (reg_columnas < 0) {
+            liberar_temp(cg, reg_fila);
+            liberar_temp(cg, reg_columna);
+            return 0;
+        }
+
+        if (!emitir_constante(cg, reg_columnas,
+                              (int32_t)simbolo.dimensiones[1])) {
+            liberar_temp(cg, reg_fila);
+            liberar_temp(cg, reg_columna);
+            liberar_temp(cg, reg_columnas);
+            return 0;
+        }
+
+        /* i * columnas, reutilizando la multiplicacion software existente. */
+        reg_lineal = generar_multiplicacion(cg, nodo,
+                                             reg_fila,
+                                             reg_columnas);
+        if (reg_lineal < 0) {
+            liberar_temp(cg, reg_columna);
+            return 0;
+        }
+
+        if (!emitir_instruccion(cg, "ALU",
+                                "ADD x%d, x%d, x%d",
+                                reg_lineal, reg_lineal, reg_columna)) {
+            liberar_temp(cg, reg_lineal);
+            liberar_temp(cg, reg_columna);
+            return 0;
+        }
+        liberar_temp(cg, reg_columna);
+
+        /* ((fila * columnas) + columna) * 4 bytes. */
+        if (!emitir_instruccion(cg, "ALU",
+                                "SLLI x%d, x%d, 2",
+                                reg_lineal, reg_lineal) ||
+            !emitir_constante(cg, REG_DIRECCION,
+                              (int32_t)simbolo.direccion) ||
+            !emitir_instruccion(cg, "ALU",
+                                "ADD x%d, x%d, x%d",
+                                REG_DIRECCION,
+                                REG_DIRECCION,
+                                reg_lineal)) {
+            liberar_temp(cg, reg_lineal);
+            return 0;
+        }
+
+        liberar_temp(cg, reg_lineal);
+        return 1;
+    }
+}
+
+static int cargar_acceso(Codegen *cg, NodoAST *nodo)
+{
+    int reg;
+
+    if (!generar_direccion_acceso(cg, nodo))
+        return -1;
+
+    reg = reservar_temp(cg, nodo);
+    if (reg < 0)
+        return -1;
+
+    if (!emitir_instruccion(cg, "LSU",
+                            "LOAD x%d, 0(x%d)",
+                            reg, REG_DIRECCION)) {
+        liberar_temp(cg, reg);
+        return -1;
+    }
+
+    return reg;
+}
+
+static int guardar_acceso(Codegen *cg, NodoAST *nodo, int reg_valor)
+{
+    if (!generar_direccion_acceso(cg, nodo))
+        return 0;
+
+    return emitir_instruccion(cg, "LSU",
+                              "STORE x%d, 0(x%d)",
+                              reg_valor, REG_DIRECCION);
+}
+
+/* Guarda un elemento de un inicializador en una direccion ya conocida. */
+static int guardar_elemento_literal(Codegen *cg,
+                                    uint32_t direccion,
+                                    NodoAST *expresion)
+{
+    int reg_valor = generar_expresion(cg, expresion);
+
+    if (reg_valor < 0)
+        return 0;
+
+    if (!emitir_constante(cg, REG_DIRECCION, (int32_t)direccion) ||
+        !emitir_instruccion(cg, "LSU",
+                            "STORE x%d, 0(x%d)",
+                            reg_valor, REG_DIRECCION)) {
+        liberar_temp(cg, reg_valor);
+        return 0;
+    }
+
+    liberar_temp(cg, reg_valor);
+    return 1;
+}
+
+
 static int generar_expresion(Codegen *cg, NodoAST *nodo)
 {
     int izq, der, reg;
@@ -1078,6 +1284,10 @@ static int generar_expresion(Codegen *cg, NodoAST *nodo)
 
     case AST_VARIABLE:
         return cargar_variable(cg, nodo, nodo->valor);
+
+    case AST_ACCESO_LISTA:
+    case AST_ACCESO_MATRIZ:
+        return cargar_acceso(cg, nodo);
 
     case AST_OPERACION:
         if (strcmp(nodo->valor, "unario -") == 0) {
@@ -1198,18 +1408,190 @@ static void generar_asignacion(Codegen *cg, NodoAST *nodo)
     NodoAST *expresion = hijo_n(nodo, 1);
     int reg;
 
-    if (destino == NULL || destino->tipo != AST_VARIABLE) {
-        error_codegen(cg, nodo,
-                      "por ahora solo se implementan asignaciones escalares");
+    if (destino == NULL || expresion == NULL) {
+        error_codegen(cg, nodo, "asignacion incompleta");
         return;
     }
 
+    /*
+     * Se calcula primero el valor. Si el destino es lista/matriz, el
+     * calculo posterior de su indice puede reutilizar x13 sin perder el
+     * resultado, que permanece en un temporal x4-x12.
+     */
     reg = generar_expresion(cg, expresion);
     if (reg < 0)
         return;
 
-    guardar_variable(cg, nodo, destino->valor, reg);
+    if (destino->tipo == AST_VARIABLE) {
+        guardar_variable(cg, nodo, destino->valor, reg);
+    } else if (destino->tipo == AST_ACCESO_LISTA ||
+               destino->tipo == AST_ACCESO_MATRIZ) {
+        guardar_acceso(cg, destino, reg);
+    } else {
+        error_codegen(cg, destino,
+                      "destino de asignacion no soportado (tipo %d)",
+                      (int)destino->tipo);
+    }
+
     liberar_temp(cg, reg);
+}
+
+static void generar_declaracion_lista(Codegen *cg, NodoAST *nodo)
+{
+    NodoAST *variable = hijo_n(nodo, 0);
+    NodoAST *inicializador = hijo_n(nodo, 2);
+    NodoAST *elemento;
+    CodegenSimbolo simbolo;
+    uint32_t indice = 0;
+
+    if (variable == NULL || variable->tipo != AST_VARIABLE ||
+        variable->valor == NULL) {
+        error_codegen(cg, nodo, "declaracion de lista sin nombre valido");
+        return;
+    }
+
+    if (!resolver(cg, variable, variable->valor, &simbolo))
+        return;
+
+    if (simbolo.forma != CODEGEN_FORMA_LISTA ||
+        simbolo.cantidad_dimensiones < 1) {
+        error_codegen(cg, nodo,
+                      "el simbolo '%s' no esta descrito como lista",
+                      variable->valor);
+        return;
+    }
+
+    asm_emitir_comentario(&cg->emisor,
+                          "declaracion lista %s[%u]",
+                          variable->valor, simbolo.dimensiones[0]);
+
+    if (inicializador == NULL)
+        return;
+
+    if (inicializador->tipo != AST_LISTA) {
+        error_codegen(cg, inicializador,
+                      "inicializador de lista invalido");
+        return;
+    }
+
+    for (elemento = inicializador->hijo;
+         elemento != NULL;
+         elemento = elemento->siguiente, indice++) {
+        uint64_t direccion;
+
+        if (indice >= simbolo.dimensiones[0]) {
+            error_codegen(cg, elemento,
+                          "demasiados elementos para la lista '%s'",
+                          variable->valor);
+            return;
+        }
+
+        direccion = (uint64_t)simbolo.direccion +
+                    (uint64_t)indice * TAMANO_ELEMENTO_BYTES;
+        if (direccion > UINT32_MAX) {
+            error_codegen(cg, elemento,
+                          "direccion fuera de rango al inicializar '%s'",
+                          variable->valor);
+            return;
+        }
+
+        if (!guardar_elemento_literal(cg,
+                                      (uint32_t)direccion, elemento))
+            return;
+    }
+}
+
+static void generar_declaracion_matriz(Codegen *cg, NodoAST *nodo)
+{
+    NodoAST *variable = hijo_n(nodo, 0);
+    NodoAST *inicializador = hijo_n(nodo, 3);
+    NodoAST *fila;
+    CodegenSimbolo simbolo;
+    uint32_t indice_fila = 0;
+
+    if (variable == NULL || variable->tipo != AST_VARIABLE ||
+        variable->valor == NULL) {
+        error_codegen(cg, nodo, "declaracion de matriz sin nombre valido");
+        return;
+    }
+
+    if (!resolver(cg, variable, variable->valor, &simbolo))
+        return;
+
+    if (simbolo.forma != CODEGEN_FORMA_MATRIZ ||
+        simbolo.cantidad_dimensiones < 2 ||
+        simbolo.dimensiones[1] == 0) {
+        error_codegen(cg, nodo,
+                      "el simbolo '%s' no tiene dimensiones de matriz resueltas",
+                      variable->valor);
+        return;
+    }
+
+    asm_emitir_comentario(&cg->emisor,
+                          "declaracion matriz %s[%u][%u] row-major",
+                          variable->valor,
+                          simbolo.dimensiones[0],
+                          simbolo.dimensiones[1]);
+
+    if (inicializador == NULL)
+        return;
+
+    if (inicializador->tipo != AST_MATRIZ) {
+        error_codegen(cg, inicializador,
+                      "inicializador de matriz invalido");
+        return;
+    }
+
+    for (fila = inicializador->hijo;
+         fila != NULL;
+         fila = fila->siguiente, indice_fila++) {
+        NodoAST *elemento;
+        uint32_t indice_columna = 0;
+
+        if (indice_fila >= simbolo.dimensiones[0]) {
+            error_codegen(cg, fila,
+                          "demasiadas filas para la matriz '%s'",
+                          variable->valor);
+            return;
+        }
+
+        if (fila->tipo != AST_LISTA) {
+            error_codegen(cg, fila,
+                          "fila invalida en inicializador de matriz");
+            return;
+        }
+
+        for (elemento = fila->hijo;
+             elemento != NULL;
+             elemento = elemento->siguiente, indice_columna++) {
+            uint64_t indice_lineal;
+            uint64_t direccion;
+
+            if (indice_columna >= simbolo.dimensiones[1]) {
+                error_codegen(cg, elemento,
+                              "demasiadas columnas en la fila %u de '%s'",
+                              indice_fila, variable->valor);
+                return;
+            }
+
+            indice_lineal =
+                (uint64_t)indice_fila * simbolo.dimensiones[1] +
+                indice_columna;
+            direccion = (uint64_t)simbolo.direccion +
+                        indice_lineal * TAMANO_ELEMENTO_BYTES;
+
+            if (direccion > UINT32_MAX) {
+                error_codegen(cg, elemento,
+                              "direccion fuera de rango al inicializar '%s'",
+                              variable->valor);
+                return;
+            }
+
+            if (!guardar_elemento_literal(cg,
+                                          (uint32_t)direccion, elemento))
+                return;
+        }
+    }
 }
 
 
@@ -1449,11 +1831,17 @@ static void generar_nodo(Codegen *cg, NodoAST *nodo)
         generar_break(cg, nodo);
         break;
 
+    case AST_DECL_LISTA:
+        generar_declaracion_lista(cg, nodo);
+        break;
+
+    case AST_DECL_MATRIZ:
+        generar_declaracion_matriz(cg, nodo);
+        break;
+
     case AST_FUNCION:
     case AST_RETURN:
     case AST_LLAMADA:
-    case AST_DECL_LISTA:
-    case AST_DECL_MATRIZ:
         asm_emitir_comentario(&cg->emisor,
                               "TODO Fase 4: nodo tipo %d linea %d",
                               (int)nodo->tipo, nodo->linea);
