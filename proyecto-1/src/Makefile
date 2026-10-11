@@ -25,8 +25,10 @@ lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h
 	$(FLEX) -o $@ $(LEXER)
 
 # Compilar el lexer, el parser y las funciones del AST
-$(TARGET): parser.tab.c lex.yy.c ast.c ast.h
-	$(CC) $(CFLAGS) -o $@ parser.tab.c lex.yy.c ast.c
+$(TARGET): parser.tab.c lex.yy.c ast.c asm_emitter.c codegen.c \
+          ast.h asm_emitter.h codegen.h
+	$(CC) $(CFLAGS) -o $@ \
+	    parser.tab.c lex.yy.c ast.c asm_emitter.c codegen.c
 
 # Ejecutar el compilador con un archivo de prueba
 run: $(TARGET)
