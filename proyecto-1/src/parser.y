@@ -9,6 +9,8 @@
 #include "ast.h"
 #include "tabla_simbolos.h"
 #include "semantico.h"
+#include "codegen.h"
+#include "codegen_tabla.h"
 
 int yylex(void);
 extern int yylineno;
@@ -238,7 +240,7 @@ void parser_marcar_identificador(NodoAST *nodo)
         parser_preparar_funcion(nodo, nodo->valor, nodo->linea, 0);
 }
 
-static Ambito *parser_ambito_identificador(const NodoAST *nodo)
+Ambito *parser_ambito_identificador(const NodoAST *nodo)
 {
     MarcaIdentificador *marca;
     for (marca = marcas_identificadores; marca != NULL; marca = marca->siguiente)
@@ -1409,7 +1411,8 @@ int main(void)
             printf("\nArbol de sintaxis abstracta:\n");
             ast_imprimir(raiz, 0);
 
-            /* Ejecutar el analisis semantico */
+
+            /* Primero ejecutar el analisis semantico */
             printf("\nIniciando analisis semantico...\n");
 
             errores_semanticos += semantico_analizar(
@@ -1419,7 +1422,41 @@ int main(void)
                 NULL
             );
 
-            /* Liberar el AST despues del analisis */
+            /* Generar ensamblador solo si no hay errores */
+            if (errores_semanticos == 0)
+            {
+                CodegenTablaContexto contexto_codegen;
+                CodegenConfig config_codegen = {0};
+
+                contexto_codegen.tabla = tabla;
+                contexto_codegen.obtener_ambito_nodo =
+                    parser_ambito_identificador;
+
+                config_codegen.resolver_simbolo_nodo =
+                    codegen_resolver_desde_tabla;
+                config_codegen.contexto_simbolos =
+                    &contexto_codegen;
+
+                if (!codegen_generar_archivo(
+                        raiz, "salida.asm", &config_codegen))
+                {
+                    fprintf(stderr,
+                            "Error: fallo la generacion de ensamblador.\n");
+
+                    ast_liberar(raiz);
+                    raiz = NULL;
+
+                    parser_liberar_marcas();
+                    parser_liberar_contextos_funciones();
+                    ts_destruir(tabla);
+                    tabla = NULL;
+
+                    return EXIT_FAILURE;
+                }
+
+                printf("\nEnsamblador generado: salida.asm\n");
+            }
+
             ast_liberar(raiz);
             raiz = NULL;
         }

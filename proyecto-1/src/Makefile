@@ -1,3 +1,4 @@
+
 CC := gcc
 FLEX := flex
 BISON := bison
@@ -11,32 +12,42 @@ BISONFLAGS := -d -Wall
 
 .PHONY: all run clean rebuild
 
-# Archivo de prueba que se usa si no se indica otro
+# Archivo de prueba por defecto
 FILE ?= pru1.txt
 
 all: $(TARGET)
 
-# Generar el parser y su archivo de cabecera
-parser.tab.c: $(PARSER) ast.h tabla_simbolos.h
+# Generar parser con Bison
+parser.tab.c: $(PARSER) ast.h tabla_simbolos.h semantico.h codegen.h codegen_tabla.h scheduler.h
 	$(BISON) $(BISONFLAGS) -o $@ $(PARSER)
 
-# Generar el lexer usando los tokens de Bison
-lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h 
+# Generar lexer con Flex
+lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h
 	$(FLEX) -o $@ $(LEXER)
 
-# Compilar el lexer, el parser y las funciones del AST
-$(TARGET): parser.tab.c lex.yy.c ast.c ast.h tabla_simbolos.c tabla_simbolos.h semantico.c semantico.h
-	$(CC) $(CFLAGS) -o $@ parser.tab.c lex.yy.c ast.c tabla_simbolos.c semantico.c
+# Compilar todos los componentes del compilador
+$(TARGET): parser.tab.c lex.yy.c ast.c ast.h \
+           tabla_simbolos.c tabla_simbolos.h \
+           memoria.c memoria.h \
+           semantico.c semantico.h \
+           asm_emitter.c asm_emitter.h \
+           scheduler.c scheduler.h \
+           codegen.c codegen.h \
+           codegen_tabla.c codegen_tabla.h
+	$(CC) $(CFLAGS) -o $@ \
+	    parser.tab.c lex.yy.c ast.c \
+	    tabla_simbolos.c memoria.c semantico.c \
+	    asm_emitter.c scheduler.c codegen.c codegen_tabla.c
 
-# Ejecutar el compilador con un archivo de prueba
+# Ejecutar el compilador con un archivo
 run: $(TARGET)
 	./$(TARGET) < $(FILE)
 
-# Recompilar todo desde cero
+# Reconstruir el proyecto
 rebuild:
 	$(MAKE) clean
 	$(MAKE) all
 
-# Eliminar los archivos generados
+# Eliminar archivos generados
 clean:
-	rm -f $(TARGET) $(TARGET).exe parser.tab.c parser.tab.h lex.yy.c
+	rm -f $(TARGET) $(TARGET).exe parser.tab.c parser.tab.h lex.yy.c salida.asm
