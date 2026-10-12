@@ -1,0 +1,15 @@
+defina vacio principal() {
+    entero i = 99 :)
+    entero total = 0 :)
+    para(entero i = 0, i < 3, i = i + 1) {
+        entero temporal = i :)
+        mientras(temporal < 2) {
+            entero paso = temporal :)
+            temporal = temporal + 1 :)
+        }:)
+        total = total + i :)
+    }:)
+    para(i = 0, i < 2, i = i + 1) {
+        entero nuevo = i :)
+    }:)
+}:)
