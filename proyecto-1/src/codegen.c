@@ -1,6 +1,7 @@
 #include "codegen.h"
 #include "asm_emitter.h"
 #include "memoria.h"
+#include "scheduler.h"
 
 #include <limits.h>
 #include <stdarg.h>
@@ -15,7 +16,6 @@
 #define REG_DIRECCION 13
 #define REG_SP 14
 #define REG_FP 15
-#define NOPS_POR_DEFECTO 4
 #define MAX_NIVELES_BUCLE 32
 #define MAX_PARAMETROS_FUNCION 64
 #define TAMANO_ELEMENTO_BYTES 4u
@@ -24,6 +24,7 @@
 
 typedef struct {
     AsmEmitter emisor;
+    Scheduler scheduler;
     CodegenConfig config;
     unsigned char temp_ocupado[16];
     int errores;
@@ -152,6 +153,9 @@ static int emitir_instruccion(Codegen *cg,
     char texto[256];
     va_list args;
     int n;
+    SchedulerInfo info;
+    unsigned nops;
+    size_t bundle_instruccion;
 
     va_start(args, formato);
     n = vsnprintf(texto, sizeof(texto), formato, args);
@@ -162,17 +166,35 @@ static int emitir_instruccion(Codegen *cg,
         return 0;
     }
 
+    if (!scheduler_analizar(slot, texto, &info)) {
+        fprintf(stderr,
+                "Error de generacion: el scheduler no reconoce %s: %s\n",
+                slot, texto);
+        cg->errores++;
+        return 0;
+    }
+
+    nops = scheduler_nops_necesarios(&cg->scheduler,
+                                     &info,
+                                     asm_bundle_actual(&cg->emisor));
+    if (nops > 0) {
+        if (!asm_emitir_comentario(&cg->emisor,
+                                   "scheduler RAW: %u NOP(s)", nops) ||
+            !asm_emitir_nops(&cg->emisor, nops)) {
+            cg->errores++;
+            return 0;
+        }
+    }
+
+    bundle_instruccion = asm_bundle_actual(&cg->emisor);
     if (!asm_emitir_slot(&cg->emisor, slot, "%s", texto)) {
         cg->errores++;
         return 0;
     }
 
-    if (cg->config.nops_dependencia > 0 &&
-        !asm_emitir_nops(&cg->emisor, cg->config.nops_dependencia)) {
-        cg->errores++;
-        return 0;
-    }
-
+    scheduler_registrar_escrituras(&cg->scheduler,
+                                   &info,
+                                   bundle_instruccion);
     return 1;
 }
 
@@ -1545,8 +1567,8 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
     uint32_t bytes_reserva;
     int reg;
     int reg_resultado = -1;
-    int delta_retorno;
     char etiqueta_funcion[160];
+    char etiqueta_retorno_llamada[96];
 
     if (nodo == NULL || nodo->valor == NULL) {
         error_codegen(cg, nodo, "llamada sin nombre de funcion");
@@ -1694,27 +1716,29 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
         }
     }
 
-    /* Reservar el slot de retorno y calcular su PC real. */
+    /*
+     * Reservar el slot de retorno. La direccion ya no puede calcularse con
+     * una cantidad fija de NOPs, porque ahora la separacion depende de RAW.
+     * Se deja una etiqueta simbolica para que Fase 5 calcule el offset real.
+     */
     if (!emitir_ajuste_sp(cg, -4))
         return -1;
 
-    delta_retorno = (int)(3u * (1u + cg->config.nops_dependencia) * 16u);
-    if (delta_retorno > 2047) {
-        error_codegen(cg, nodo,
-                      "la separacion de NOP hace que el retorno no quepa en ADDI");
-        return -1;
-    }
+    nueva_etiqueta(cg, "ret_call",
+                   etiqueta_retorno_llamada,
+                   sizeof(etiqueta_retorno_llamada));
 
     if (!emitir_instruccion(cg, "ALU",
-                            "ADDI x%d, x1, %d",
-                            REG_AUXILIAR, delta_retorno) ||
+                            "ADDI x%d, x1, %s",
+                            REG_AUXILIAR, etiqueta_retorno_llamada) ||
         !emitir_instruccion(cg, "LSU",
                             "STORE x%d, 0(x%d)", REG_AUXILIAR, REG_SP))
         return -1;
 
     snprintf(etiqueta_funcion, sizeof(etiqueta_funcion),
              "func_%s", nodo->valor);
-    if (!emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_funcion))
+    if (!emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_funcion) ||
+        !asm_emitir_etiqueta(&cg->emisor, etiqueta_retorno_llamada))
         return -1;
 
     /* El callee retorna con SP apuntando al primer parametro. */
@@ -2595,9 +2619,7 @@ int codegen_generar_archivo(NodoAST *raiz,
     memset(&cg, 0, sizeof(cg));
     cg.config = *config;
     cg.raiz = raiz;
-
-    if (cg.config.nops_dependencia == 0)
-        cg.config.nops_dependencia = NOPS_POR_DEFECTO;
+    scheduler_inicializar(&cg.scheduler);
 
     if (!asm_emitter_abrir(&cg.emisor, ruta_salida)) {
         perror("No se pudo crear el archivo ensamblador");
@@ -2608,6 +2630,8 @@ int codegen_generar_archivo(NodoAST *raiz,
                           "Ensamblador intermedio generado por cdff");
     asm_emitir_comentario(&cg.emisor,
                           "Cada instruccion emitida ocupa un bundle de 16 bytes");
+    asm_emitir_comentario(&cg.emisor,
+                          "NOPs calculados por scheduler RAW para IF-ID-RR-EX-WB");
 
     generar_nodo(&cg, raiz);
 

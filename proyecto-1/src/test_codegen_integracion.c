@@ -203,7 +203,6 @@ int main(void)
     contexto.obtener_ambito_nodo = ambito_de_nodo;
     cfg.resolver_simbolo_nodo = codegen_resolver_desde_tabla;
     cfg.contexto_simbolos = &contexto;
-    cfg.nops_dependencia = 4;
 
     if (!codegen_generar_archivo(ast, "salida_codegen_integracion.asm", &cfg)) {
         fprintf(stderr, "FALLO: codegen integrado rechazo factorial.\n");
@@ -227,6 +226,8 @@ int main(void)
     EXIGIR("ADD x2, x0");
     EXIGIR("error_pila:");
     EXIGIR("BRU: JMP func_factorial");
+    EXIGIR("ret_call_");
+    EXIGIR("scheduler RAW:");
 
     if (strstr(asm_txt, "CALL") || strstr(asm_txt, "RET ") || strstr(asm_txt, "ALU: MUL")) {
         fprintf(stderr, "FALLO: aparecio una instruccion inexistente.\n");

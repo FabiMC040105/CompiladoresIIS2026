@@ -64,6 +64,7 @@ typedef struct {
     CodegenResolverSimbolo resolver_simbolo;
     CodegenResolverSimboloNodo resolver_simbolo_nodo;
     void *contexto_simbolos;
+    /* Compatibilidad historica: el scheduler actual ignora este campo. */
     unsigned nops_dependencia;
 } CodegenConfig;
 

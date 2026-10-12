@@ -1403,7 +1403,6 @@ int main(void)
                 config_codegen.resolver_simbolo_nodo =
                     codegen_resolver_desde_tabla;
                 config_codegen.contexto_simbolos = &contexto_codegen;
-                config_codegen.nops_dependencia = 4;
 
                 if (!codegen_generar_archivo(
                         raiz, "salida.asm", &config_codegen))

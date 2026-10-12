@@ -17,9 +17,8 @@ FILE ?= pru1.txt
 all: $(TARGET)
 
 # Generar el parser y su archivo de cabecera
-parser.tab.c: $(PARSER) ast.h tabla_simbolos.h codegen.h codegen_tabla.h
+parser.tab.c: $(PARSER) ast.h tabla_simbolos.h codegen.h codegen_tabla.h scheduler.h
 	$(BISON) $(BISONFLAGS) -o $@ $(PARSER)
-
 
 # Generar el lexer usando los tokens de Bison
 lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h 
@@ -28,12 +27,11 @@ lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h
 # Compilar el lexer, el parser y las funciones del AST
 $(TARGET): parser.tab.c lex.yy.c ast.c ast.h \
           tabla_simbolos.c tabla_simbolos.h memoria.c memoria.h \
-          asm_emitter.c asm_emitter.h codegen.c codegen.h \
-          codegen_tabla.c codegen_tabla.h
+          asm_emitter.c asm_emitter.h scheduler.c scheduler.h \
+          codegen.c codegen.h codegen_tabla.c codegen_tabla.h
 	$(CC) $(CFLAGS) -o $@ \
 	    parser.tab.c lex.yy.c ast.c tabla_simbolos.c memoria.c \
-	    asm_emitter.c codegen.c codegen_tabla.c
-
+	    asm_emitter.c scheduler.c codegen.c codegen_tabla.c
 
 # Ejecutar el compilador con un archivo de prueba
 run: $(TARGET)
