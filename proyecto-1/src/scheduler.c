@@ -16,7 +16,22 @@ static void marcar_lectura(SchedulerInfo *info, int reg)
         info->lee[reg] = 1;
 }
 
-static void marcar_escritura(SchedulerInfo *info, int reg)
+static void marcar_escritura_con_pc(SchedulerInfo *info, int reg)
+{
+    if (!registro_valido(reg))
+        return;
+
+    if (reg == 1) {
+        info->redirecciona_pc = 1;
+        return;
+    }
+
+    if (reg >= 2)
+        info->escribe[reg] = 1;
+}
+
+/* FEIST nunca puede redirigir x1 en el RTL final. */
+static void marcar_escritura_gpr(SchedulerInfo *info, int reg)
 {
     if (registro_valido(reg) && reg >= 2)
         info->escribe[reg] = 1;
@@ -49,7 +64,7 @@ static int analizar_alu(const char *texto, SchedulerInfo *info)
             return 0;
         marcar_lectura(info, rs1);
         marcar_lectura(info, rs2);
-        marcar_escritura(info, rd);
+        marcar_escritura_con_pc(info, rd);
         return 1;
     }
 
@@ -60,7 +75,7 @@ static int analizar_alu(const char *texto, SchedulerInfo *info)
         if (sscanf(texto, "%*s x%d, x%d", &rd, &rs1) != 2)
             return 0;
         marcar_lectura(info, rs1);
-        marcar_escritura(info, rd);
+        marcar_escritura_con_pc(info, rd);
         return 1;
     }
 
@@ -84,7 +99,7 @@ static int analizar_lsu(const char *texto, SchedulerInfo *info)
             return 0;
         (void)offset;
         marcar_lectura(info, base);
-        marcar_escritura(info, reg);
+        marcar_escritura_con_pc(info, reg);
         return 1;
     }
 
@@ -156,8 +171,8 @@ static int analizar_feist(const char *texto, SchedulerInfo *info)
         /* FROUND rdL, rdR, rsL, rsR, key, round, mode */
         if (sscanf(texto, "%*s x%d, x%d, x%d, x%d", &a, &b, &c, &d) != 4)
             return 0;
-        marcar_escritura(info, a);
-        marcar_escritura(info, b);
+        marcar_escritura_gpr(info, a);
+        marcar_escritura_gpr(info, b);
         marcar_lectura(info, c);
         marcar_lectura(info, d);
         return 1;

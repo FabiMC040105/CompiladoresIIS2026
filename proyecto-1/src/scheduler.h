@@ -9,6 +9,13 @@
 typedef struct {
     unsigned char lee[SCHEDULER_REGISTROS];
     unsigned char escribe[SCHEDULER_REGISTROS];
+
+    /*
+     * ALU/LOAD con destino x1 no escriben el register file: redirigen el PC
+     * cuando llegan a WB. El codegen inserta un bundle NOP posterior para
+     * impedir efectos laterales de un bundle joven que coincida en EX.
+     */
+    unsigned char redirecciona_pc;
 } SchedulerInfo;
 
 typedef struct {

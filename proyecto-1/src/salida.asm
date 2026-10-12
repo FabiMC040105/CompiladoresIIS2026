@@ -144,6 +144,8 @@ LSU: LOAD x13, 4(x15)
 ALU: ADDI x14, x15, 8
 ALU: ADD x15, x3, x0
 ALU: ADD x1, x13, x0
+# barrera control x1: 1 NOP
+ALU: NOP
 principal:
 ALU: ADD x15, x14, x0
 ALU: ADDI x13, x14, -8

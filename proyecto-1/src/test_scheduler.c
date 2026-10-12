@@ -80,9 +80,25 @@ int main(void)
     exigir(cons.lee[5] && cons.lee[6] && cons.escribe[7] && cons.escribe[8],
            "FROUND debe declarar dos fuentes y dos destinos");
 
+
+    /* ALU/LOAD con destino x1 redirigen el PC y requieren barrera de control. */
+    cons = analizar("ALU", "ADD x1, x13, x0");
+    exigir(cons.redirecciona_pc,
+           "ALU con destino x1 debe marcar redireccion de PC");
+
+    cons = analizar("LSU", "LOAD x1, 0(x14)");
+    exigir(cons.redirecciona_pc,
+           "LOAD con destino x1 debe marcar redireccion de PC");
+
+    /* FROUND no puede redirigir x1 en el RTL final. */
+    cons = analizar("FEIST", "FROUND x1, x8, x5, x6, 0, 1, 0");
+    exigir(!cons.redirecciona_pc && !cons.escribe[1] && cons.escribe[8],
+           "FROUND hacia x1 debe descartarse como destino, no redirigir PC");
+
     printf("PASS: RAW inmediato -> 2 NOPs.\n");
     printf("PASS: 1 bundle independiente -> 1 NOP.\n");
     printf("PASS: 2 bundles independientes -> 0 NOPs.\n");
     printf("PASS: ALU/LSU/BRU/FEIST exponen fuentes y destinos al scheduler.\n");
+    printf("PASS: escrituras ALU/LOAD a x1 activan barrera de control.\n");
     return 0;
 }

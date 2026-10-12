@@ -228,6 +228,16 @@ int main(void)
     EXIGIR("BRU: JMP func_factorial");
     EXIGIR("ret_call_");
     EXIGIR("scheduler RAW:");
+    EXIGIR("barrera control x1: 1 NOP");
+
+    if (!strstr(asm_txt,
+                "ALU: ADD x1, x13, x0\n"
+                "# barrera control x1: 1 NOP\n"
+                "ALU: NOP\n")) {
+        fprintf(stderr,
+                "FALLO: RET por x1 no quedo protegido por un bundle NOP.\n");
+        return 1;
+    }
 
     if (strstr(asm_txt, "CALL") || strstr(asm_txt, "RET ") || strstr(asm_txt, "ALU: MUL")) {
         fprintf(stderr, "FALLO: aparecio una instruccion inexistente.\n");
@@ -237,6 +247,7 @@ int main(void)
     printf("PASS: codegen usa la tabla de simbolos real.\n");
     printf("PASS: x14=SP, x15=FP, x2=retorno y offsets FP correctos.\n");
     printf("PASS: factorial ya usa un marco compatible con recursion.\n");
+    printf("PASS: RET por x1 incluye barrera de control de 1 NOP.\n");
 
     free(asm_txt);
     ast_liberar(ast);

@@ -195,6 +195,28 @@ static int emitir_instruccion(Codegen *cg,
     scheduler_registrar_escrituras(&cg->scheduler,
                                    &info,
                                    bundle_instruccion);
+
+    /*
+     * En el RTL final, una escritura ALU/LOAD a x1 redirige el PC en WB.
+     * Para ese mismo flanco, el bundle inmediatamente posterior ya puede
+     * estar en EX; un STORE o una operacion de boveda tendria un efecto
+     * lateral antes de que el flush lo invalide. Un unico bundle NOP entre
+     * ambos elimina esa ventana. No es un NOP por RAW sino una barrera de
+     * control propia de la implementacion actual del PC.
+     */
+    if (info.redirecciona_pc) {
+        if (!asm_emitir_comentario(&cg->emisor,
+                                   "barrera control x1: 1 NOP") ||
+            !asm_emitir_nops(&cg->emisor, 1)) {
+            cg->errores++;
+            return 0;
+        }
+
+        /* La redireccion es incondicional: el codigo secuencial posterior
+         * no comparte un camino de datos con el bloque que termina aqui. */
+        scheduler_inicializar(&cg->scheduler);
+    }
+
     return 1;
 }
 
