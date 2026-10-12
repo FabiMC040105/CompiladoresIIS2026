@@ -1383,28 +1383,49 @@ int main(void)
         printf("\nPrograma sintacticamente correcto.\n");
 
 
-    if (raiz != NULL)
-    {
-        printf("\nArbol de sintaxis abstracta:\n");
-        ast_imprimir(raiz, 0);
+        /* Asignar las direcciones de memoria (Camila) */
+        if (ts_asignar_direcciones_globales(tabla) != TS_OK)
+        {
+            fprintf(stderr,
+                    "Error: no se pudieron asignar las direcciones globales.\n");
 
-        /* Ejecutar el analisis semantico */
-        printf("\nIniciando analisis semantico...\n");
+            if (raiz != NULL)
+            {
+                ast_liberar(raiz);
+                raiz = NULL;
+            }
 
-        errores_semanticos += semantico_analizar(
-            raiz,
-            tabla,
-            resolver_ambito_semantico,
-            NULL
-        );
+            parser_liberar_marcas();
+            parser_liberar_contextos_funciones();
+            ts_destruir(tabla);
+            tabla = NULL;
 
-        /* Liberar el AST despues del analisis */
-        ast_liberar(raiz);
-        raiz = NULL;
-    }
+            return EXIT_FAILURE;
+        }
+
+        /* Construir y analizar el AST */
+        if (raiz != NULL)
+        {
+            printf("\nArbol de sintaxis abstracta:\n");
+            ast_imprimir(raiz, 0);
+
+            /* Ejecutar el analisis semantico */
+            printf("\nIniciando analisis semantico...\n");
+
+            errores_semanticos += semantico_analizar(
+                raiz,
+                tabla,
+                resolver_ambito_semantico,
+                NULL
+            );
+
+            /* Liberar el AST despues del analisis */
+            ast_liberar(raiz);
+            raiz = NULL;
+        }
 
 
-        /* Todavia no hay acciones de insercion: tabla de simbolos vacia. */
+        /* Mostrar los simbolos, sus ambitos y las firmas de funciones. */
         ts_imprimir(tabla, stdout);
         ts_imprimir_ambitos(tabla, stdout);
         parser_imprimir_firmas(stdout);

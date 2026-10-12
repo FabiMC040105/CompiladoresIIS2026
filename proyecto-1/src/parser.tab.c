@@ -3612,6 +3612,19 @@ int main(void)
     {
         printf("\nPrograma sintacticamente correcto.\n");
 
+        if (ts_asignar_direcciones_globales(tabla) != TS_OK)
+        {
+            fprintf(stderr,
+                    "Error: no se pudieron asignar las direcciones globales.\n");
+
+            parser_liberar_marcas();
+            parser_liberar_contextos_funciones();
+            ts_destruir(tabla);
+            tabla = NULL;
+
+            return EXIT_FAILURE;
+        }
+
         if (raiz != NULL)
         {
             printf("\nArbol de sintaxis abstracta:\n");
@@ -3620,7 +3633,7 @@ int main(void)
             raiz = NULL;
         }
 
-        /* Todavia no hay acciones de insercion: tabla de simbolos vacia. */
+        /* Mostrar los simbolos, sus ambitos y las firmas de funciones. */
         ts_imprimir(tabla, stdout);
         ts_imprimir_ambitos(tabla, stdout);
         parser_imprimir_firmas(stdout);

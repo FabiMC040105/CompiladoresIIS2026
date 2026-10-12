@@ -87,8 +87,35 @@ struct Simbolo {
     Ambito *ambito;
 
     /* Memoria */
-    long direccion;
+        
+    /*
+    * Informacion de memoria administrada por el compilador.
+    *
+    * Si categoria == SIM_VARIABLE y ambito == ambito_global:
+    *     direccion contiene una direccion absoluta.
+    *
+    * Si categoria == SIM_VARIABLE y pertenece a una funcion:
+    *     direccion contiene un desplazamiento relativo a x15 (FP).
+    *
+    * Si categoria == SIM_PARAMETRO:
+    *     direccion contiene un desplazamiento relativo a x15 (FP).
+    *
+    * Si categoria == SIM_FUNCION:
+    *     direccion_asignada permanece en 0. La direccion del codigo
+    *     se resolvera durante la generacion de codigo.
+    *
+    * direccion_asignada permite distinguir una direccion valida de
+    * un simbolo al que todavia no se le ha asignado ubicacion.
+    */
+    long direccion; //Dirección absoluta para globales o desplazamiento respecto a FP para parámetros y locales.
     int direccion_asignada;
+
+    /* Informacion de memoria */
+    long tamano_bytes; //Cantidad de bytes que ocupa una variable.
+    long tamano_parametros; //Espacio de parámetros del marco, según la convención que definamos.
+    long tamano_locales; //Espacio reservado para las variables locales de la función.
+    long tamano_marco; //Tamaño que el generador de código necesitará para reservar el espacio local de la función.
+
 
     /* Informacion de funciones */
     ParametroFirma *parametros;
@@ -115,6 +142,13 @@ typedef struct {
 
     int siguiente_id_simbolo;
     int siguiente_id_ambito;
+
+    /*
+    * Siguiente direccion absoluta disponible para datos globales.
+    * No representa el puntero de pila ni el desplazamiento de una
+    * variable local.
+    */
+    long siguiente_direccion_global;
 } TablaSimbolos;
 
 /* ==========================================
@@ -185,6 +219,8 @@ ResultadoTS ts_definir_dimensiones(
     const char *dimension1,
     const char *dimension2
 );
+
+ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla);
 
 /* ==========================================
    14. FUNCIONES Y PARAMETROS
