@@ -12,12 +12,12 @@ int main(void)
     }
 
     /*
-     * Una lista de 513 enteros necesita 2052 bytes.
-     * Supera el limite de 2048 bytes de esta version.
+     * Una lista de 8193 enteros necesita 32772 bytes.
+     * Supera el limite global de 32768 bytes.
      */
     if (ts_insertar(tabla, "lista_grande", SIM_VARIABLE,
                     TIPO_ENTERO, FORMA_LISTA, 1, &lista) != TS_OK ||
-        ts_definir_dimensiones(lista, "513", NULL) != TS_OK) {
+        ts_definir_dimensiones(lista, "8193", NULL) != TS_OK) {
         printf("ERROR al preparar la prueba.\n");
         ts_destruir(tabla);
         return 1;
@@ -32,7 +32,8 @@ int main(void)
         return 1;
     }
 
-    printf("PRUEBA 2 CORRECTA: se rechazo la lista que excede 2048 bytes.\n");
+    printf("PRUEBA 2 CORRECTA: se rechazo la lista que excede "
+           "32768 bytes de memoria global.\n");
 
     ts_destruir(tabla);
     return 0;

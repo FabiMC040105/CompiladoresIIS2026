@@ -107,8 +107,14 @@ struct Simbolo {
     * direccion_asignada permite distinguir una direccion valida de
     * un simbolo al que todavia no se le ha asignado ubicacion.
     */
-    long direccion;
+    long direccion; //Dirección absoluta para globales o desplazamiento respecto a FP para parámetros y locales.
     int direccion_asignada;
+
+    /* Informacion de memoria */
+    long tamano_bytes; //Cantidad de bytes que ocupa una variable.
+    long tamano_parametros; //Espacio de parámetros del marco, según la convención que definamos.
+    long tamano_locales; //Espacio reservado para las variables locales de la función.
+    long tamano_marco; //Tamaño que el generador de código necesitará para reservar el espacio local de la función.
 
 
     /* Informacion de funciones */
