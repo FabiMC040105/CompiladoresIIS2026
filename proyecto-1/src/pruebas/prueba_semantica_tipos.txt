@@ -1,0 +1,4 @@
+defina vacio principal() {
+    entero edad = 20 :)
+    edad = verdadero :)
+}:)

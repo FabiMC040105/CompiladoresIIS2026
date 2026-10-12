@@ -8,6 +8,7 @@
 #include <string.h>
 #include "ast.h"
 #include "tabla_simbolos.h"
+#include "semantico.h"
 
 int yylex(void);
 extern int yylineno;
@@ -245,6 +246,21 @@ static Ambito *parser_ambito_identificador(const NodoAST *nodo)
             return marca->ambito;
     return NULL;
 }
+
+
+/* Permite al analisis semantico consultar el
+   ambito registrado por el parser. */
+static const Ambito *resolver_ambito_semantico(
+    const NodoAST *nodo,
+    void *contexto
+)
+{
+    (void)contexto;
+
+    return parser_ambito_identificador(nodo);
+}
+
+
 
 static void parser_liberar_marcas(void)
 {
@@ -1366,13 +1382,27 @@ int main(void)
     {
         printf("\nPrograma sintacticamente correcto.\n");
 
-        if (raiz != NULL)
-        {
-            printf("\nArbol de sintaxis abstracta:\n");
-            ast_imprimir(raiz, 0);
-            ast_liberar(raiz);
-            raiz = NULL;
-        }
+
+    if (raiz != NULL)
+    {
+        printf("\nArbol de sintaxis abstracta:\n");
+        ast_imprimir(raiz, 0);
+
+        /* Ejecutar el analisis semantico */
+        printf("\nIniciando analisis semantico...\n");
+
+        errores_semanticos += semantico_analizar(
+            raiz,
+            tabla,
+            resolver_ambito_semantico,
+            NULL
+        );
+
+        /* Liberar el AST despues del analisis */
+        ast_liberar(raiz);
+        raiz = NULL;
+    }
+
 
         /* Todavia no hay acciones de insercion: tabla de simbolos vacia. */
         ts_imprimir(tabla, stdout);
