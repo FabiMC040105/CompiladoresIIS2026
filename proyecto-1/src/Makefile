@@ -20,6 +20,7 @@ all: $(TARGET)
 parser.tab.c: $(PARSER) ast.h tabla_simbolos.h codegen.h codegen_tabla.h
 	$(BISON) $(BISONFLAGS) -o $@ $(PARSER)
 
+
 # Generar el lexer usando los tokens de Bison
 lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h 
 	$(FLEX) -o $@ $(LEXER)
@@ -32,6 +33,7 @@ $(TARGET): parser.tab.c lex.yy.c ast.c ast.h \
 	$(CC) $(CFLAGS) -o $@ \
 	    parser.tab.c lex.yy.c ast.c tabla_simbolos.c memoria.c \
 	    asm_emitter.c codegen.c codegen_tabla.c
+
 
 # Ejecutar el compilador con un archivo de prueba
 run: $(TARGET)
