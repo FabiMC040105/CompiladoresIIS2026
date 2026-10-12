@@ -1,5 +1,6 @@
 #include "codegen.h"
 #include "asm_emitter.h"
+#include "memoria.h"
 
 #include <limits.h>
 #include <stdarg.h>
@@ -7,17 +8,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define REG_SP 2
-#define REG_FP 3
+#define REG_RETORNO_VALOR 2
+#define REG_AUXILIAR 3
 #define REG_TEMP_PRIMERO 4
 #define REG_TEMP_ULTIMO 12
 #define REG_DIRECCION 13
-#define REG_RETORNO_DIRECCION 14
-#define REG_RETORNO_VALOR 15
+#define REG_SP 14
+#define REG_FP 15
 #define NOPS_POR_DEFECTO 4
 #define MAX_NIVELES_BUCLE 32
+#define MAX_PARAMETROS_FUNCION 64
 #define TAMANO_ELEMENTO_BYTES 4u
-#define PILA_INICIAL_DEFECTO 0x0000FFFCu
+#define PILA_INICIAL_DEFECTO MEMORIA_TOTAL_BYTES
+#define BYTES_TEMPORALES_GUARDADOS ((REG_TEMP_ULTIMO - REG_TEMP_PRIMERO + 1) * 4u)
 
 typedef struct {
     AsmEmitter emisor;
@@ -35,6 +38,7 @@ typedef struct {
         char etiqueta_continue[64];
     } pila_bucles[MAX_NIVELES_BUCLE];
     unsigned profundidad_bucle;
+    int usa_error_pila;
 } Codegen;
 
 static NodoAST *hijo_n(NodoAST *nodo, unsigned indice)
@@ -225,20 +229,20 @@ static int resolver(Codegen *cg,
      */
     memset(simbolo, 0, sizeof(*simbolo));
     simbolo->forma = CODEGEN_FORMA_ESCALAR;
+    simbolo->categoria = CODEGEN_CAT_VARIABLE;
+    simbolo->ubicacion = CODEGEN_UBICACION_GLOBAL;
 
     /*
-     * Para la integracion real se prefiere resolver por nodo. El parser de
-     * Fase 3 ya asocia identificadores concretos con su ambito, por lo que
-     * esta interfaz permite distinguir, por ejemplo, un "resultado" local
-     * de otro "resultado" declarado en principal.
+     * La integracion real siempre prefiere el resolvedor por nodo porque
+     * conoce el ambito exacto del identificador. El resolvedor legado queda
+     * disponible solamente para las pruebas de los pasos anteriores.
      */
-    if (cg->config.resolver_simbolo != NULL) {
-        /* Compatibilidad con los pasos anteriores. */
-        encontrado = cg->config.resolver_simbolo(
-            cg->config.contexto_simbolos, nombre, simbolo);
-    } else if (cg->config.resolver_simbolo_nodo != NULL) {
+    if (cg->config.resolver_simbolo_nodo != NULL) {
         encontrado = cg->config.resolver_simbolo_nodo(
             cg->config.contexto_simbolos, nodo, nombre, simbolo);
+    } else if (cg->config.resolver_simbolo != NULL) {
+        encontrado = cg->config.resolver_simbolo(
+            cg->config.contexto_simbolos, nombre, simbolo);
     }
 
     if (!encontrado) {
@@ -247,6 +251,104 @@ static int resolver(Codegen *cg,
     }
 
     return 1;
+}
+
+static int offset_cabe_imm12(long offset)
+{
+    return offset >= -2048 && offset <= 2047;
+}
+
+static int emitir_ajuste_sp(Codegen *cg, long delta)
+{
+    if (delta == 0)
+        return 1;
+
+    if (offset_cabe_imm12(delta))
+        return emitir_instruccion(cg, "ALU",
+                                  "ADDI x%d, x%d, %ld",
+                                  REG_SP, REG_SP, delta);
+
+    if (delta > INT32_MAX || delta < INT32_MIN) {
+        cg->errores++;
+        return 0;
+    }
+
+    if (!emitir_constante(cg, REG_AUXILIAR, (int32_t)delta))
+        return 0;
+
+    return emitir_instruccion(cg, "ALU",
+                              "ADD x%d, x%d, x%d",
+                              REG_SP, REG_SP, REG_AUXILIAR);
+}
+
+static int emitir_direccion_fp(Codegen *cg, int reg_destino, long offset)
+{
+    if (offset_cabe_imm12(offset))
+        return emitir_instruccion(cg, "ALU",
+                                  "ADDI x%d, x%d, %ld",
+                                  reg_destino, REG_FP, offset);
+
+    if (offset > INT32_MAX || offset < INT32_MIN)
+        return 0;
+
+    if (!emitir_constante(cg, REG_AUXILIAR, (int32_t)offset))
+        return 0;
+
+    return emitir_instruccion(cg, "ALU",
+                              "ADD x%d, x%d, x%d",
+                              reg_destino, REG_FP, REG_AUXILIAR);
+}
+
+/*
+ * Deja en reg_destino la direccion base real del simbolo.
+ * - Global: direccion absoluta.
+ * - Local:  FP + offset negativo.
+ * - Parametro escalar: FP + offset positivo (direccion del slot).
+ * - Parametro lista/matriz: el slot contiene una direccion y se desreferencia.
+ */
+static int emitir_base_simbolo(Codegen *cg,
+                               NodoAST *nodo,
+                               const CodegenSimbolo *simbolo,
+                               int reg_destino)
+{
+    if (simbolo->ubicacion == CODEGEN_UBICACION_GLOBAL) {
+        if (simbolo->direccion < INT32_MIN || simbolo->direccion > INT32_MAX) {
+            error_codegen(cg, nodo, "direccion global fuera de rango");
+            return 0;
+        }
+        return emitir_constante(cg, reg_destino, (int32_t)simbolo->direccion);
+    }
+
+    if (simbolo->ubicacion == CODEGEN_UBICACION_LOCAL) {
+        if (!emitir_direccion_fp(cg, reg_destino, simbolo->direccion)) {
+            error_codegen(cg, nodo, "offset local fuera de rango");
+            return 0;
+        }
+        return 1;
+    }
+
+    if (simbolo->ubicacion == CODEGEN_UBICACION_PARAMETRO) {
+        if (simbolo->parametro_por_referencia) {
+            if (offset_cabe_imm12(simbolo->direccion))
+                return emitir_instruccion(cg, "LSU",
+                                          "LOAD x%d, %ld(x%d)",
+                                          reg_destino,
+                                          simbolo->direccion,
+                                          REG_FP);
+
+            if (!emitir_direccion_fp(cg, reg_destino, simbolo->direccion))
+                return 0;
+            return emitir_instruccion(cg, "LSU",
+                                      "LOAD x%d, 0(x%d)",
+                                      reg_destino, reg_destino);
+        }
+
+        return emitir_direccion_fp(cg, reg_destino, simbolo->direccion);
+    }
+
+    error_codegen(cg, nodo, "el simbolo '%s' no tiene almacenamiento de datos",
+                  simbolo->nombre != NULL ? simbolo->nombre : "?");
+    return 0;
 }
 
 static int cargar_variable(Codegen *cg, NodoAST *nodo, const char *nombre)
@@ -261,7 +363,30 @@ static int cargar_variable(Codegen *cg, NodoAST *nodo, const char *nombre)
     if (reg < 0)
         return -1;
 
-    if (!emitir_constante(cg, REG_DIRECCION, (int32_t)simbolo.direccion) ||
+    if (simbolo.ubicacion == CODEGEN_UBICACION_GLOBAL) {
+        if (!emitir_base_simbolo(cg, nodo, &simbolo, REG_DIRECCION) ||
+            !emitir_instruccion(cg, "LSU",
+                                "LOAD x%d, 0(x%d)", reg, REG_DIRECCION)) {
+            liberar_temp(cg, reg);
+            return -1;
+        }
+        return reg;
+    }
+
+    if ((simbolo.ubicacion == CODEGEN_UBICACION_LOCAL ||
+         simbolo.ubicacion == CODEGEN_UBICACION_PARAMETRO) &&
+        !simbolo.parametro_por_referencia &&
+        offset_cabe_imm12(simbolo.direccion)) {
+        if (!emitir_instruccion(cg, "LSU",
+                                "LOAD x%d, %ld(x%d)",
+                                reg, simbolo.direccion, REG_FP)) {
+            liberar_temp(cg, reg);
+            return -1;
+        }
+        return reg;
+    }
+
+    if (!emitir_base_simbolo(cg, nodo, &simbolo, REG_DIRECCION) ||
         !emitir_instruccion(cg, "LSU",
                             "LOAD x%d, 0(x%d)", reg, REG_DIRECCION)) {
         liberar_temp(cg, reg);
@@ -281,13 +406,36 @@ static int guardar_variable(Codegen *cg,
     if (!resolver(cg, identificador, nombre, &simbolo))
         return 0;
 
-    if (!emitir_constante(cg, REG_DIRECCION, (int32_t)simbolo.direccion))
+    if (simbolo.parametro_por_referencia) {
+        error_codegen(cg, identificador,
+                      "no se puede asignar un arreglo completo a '%s'",
+                      nombre);
+        return 0;
+    }
+
+    if (simbolo.ubicacion == CODEGEN_UBICACION_GLOBAL) {
+        if (!emitir_base_simbolo(cg, identificador, &simbolo, REG_DIRECCION))
+            return 0;
+        return emitir_instruccion(cg, "LSU",
+                                  "STORE x%d, 0(x%d)",
+                                  reg_valor, REG_DIRECCION);
+    }
+
+    if ((simbolo.ubicacion == CODEGEN_UBICACION_LOCAL ||
+         simbolo.ubicacion == CODEGEN_UBICACION_PARAMETRO) &&
+        offset_cabe_imm12(simbolo.direccion))
+        return emitir_instruccion(cg, "LSU",
+                                  "STORE x%d, %ld(x%d)",
+                                  reg_valor, simbolo.direccion, REG_FP);
+
+    if (!emitir_base_simbolo(cg, identificador, &simbolo, REG_DIRECCION))
         return 0;
 
     return emitir_instruccion(cg, "LSU",
                               "STORE x%d, 0(x%d)",
                               reg_valor, REG_DIRECCION);
 }
+
 
 
 /* Busca una definicion de funcion de nivel superior por nombre. */
@@ -311,16 +459,6 @@ static NodoAST *buscar_funcion_ast(Codegen *cg, const char *nombre)
     }
 
     return NULL;
-}
-
-static unsigned contar_hermanos(NodoAST *nodo)
-{
-    unsigned cantidad = 0;
-    while (nodo != NULL) {
-        cantidad++;
-        nodo = nodo->siguiente;
-    }
-    return cantidad;
 }
 
 static int generar_expresion(Codegen *cg, NodoAST *nodo);
@@ -1151,8 +1289,7 @@ static int generar_direccion_acceso(Codegen *cg, NodoAST *nodo)
         if (!emitir_instruccion(cg, "ALU",
                                 "SLLI x%d, x%d, 2",
                                 reg_indice, reg_indice) ||
-            !emitir_constante(cg, REG_DIRECCION,
-                              (int32_t)simbolo.direccion) ||
+            !emitir_base_simbolo(cg, variable, &simbolo, REG_DIRECCION) ||
             !emitir_instruccion(cg, "ALU",
                                 "ADD x%d, x%d, x%d",
                                 REG_DIRECCION,
@@ -1229,8 +1366,7 @@ static int generar_direccion_acceso(Codegen *cg, NodoAST *nodo)
         if (!emitir_instruccion(cg, "ALU",
                                 "SLLI x%d, x%d, 2",
                                 reg_lineal, reg_lineal) ||
-            !emitir_constante(cg, REG_DIRECCION,
-                              (int32_t)simbolo.direccion) ||
+            !emitir_base_simbolo(cg, variable, &simbolo, REG_DIRECCION) ||
             !emitir_instruccion(cg, "ALU",
                                 "ADD x%d, x%d, x%d",
                                 REG_DIRECCION,
@@ -1277,8 +1413,29 @@ static int guardar_acceso(Codegen *cg, NodoAST *nodo, int reg_valor)
 }
 
 /* Guarda un elemento de un inicializador en una direccion ya conocida. */
+static int sumar_offset_direccion(Codegen *cg, uint32_t offset)
+{
+    if (offset == 0)
+        return 1;
+
+    if (offset <= 2047u)
+        return emitir_instruccion(cg, "ALU",
+                                  "ADDI x%d, x%d, %u",
+                                  REG_DIRECCION, REG_DIRECCION, offset);
+
+    if (!emitir_constante(cg, REG_AUXILIAR, (int32_t)offset))
+        return 0;
+
+    return emitir_instruccion(cg, "ALU",
+                              "ADD x%d, x%d, x%d",
+                              REG_DIRECCION, REG_DIRECCION, REG_AUXILIAR);
+}
+
+/* Guarda un elemento de inicializador en base(simbolo)+offset. */
 static int guardar_elemento_literal(Codegen *cg,
-                                    uint32_t direccion,
+                                    NodoAST *variable,
+                                    const CodegenSimbolo *simbolo,
+                                    uint32_t offset,
                                     NodoAST *expresion)
 {
     int reg_valor = generar_expresion(cg, expresion);
@@ -1286,7 +1443,8 @@ static int guardar_elemento_literal(Codegen *cg,
     if (reg_valor < 0)
         return 0;
 
-    if (!emitir_constante(cg, REG_DIRECCION, (int32_t)direccion) ||
+    if (!emitir_base_simbolo(cg, variable, simbolo, REG_DIRECCION) ||
+        !sumar_offset_direccion(cg, offset) ||
         !emitir_instruccion(cg, "LSU",
                             "STORE x%d, 0(x%d)",
                             reg_valor, REG_DIRECCION)) {
@@ -1299,27 +1457,92 @@ static int guardar_elemento_literal(Codegen *cg,
 }
 
 
+
+/* Empuja una palabra de 32 bits en la pila. */
+static int emitir_push_reg(Codegen *cg, int reg)
+{
+    return emitir_ajuste_sp(cg, -4) &&
+           emitir_instruccion(cg, "LSU",
+                              "STORE x%d, 0(x%d)", reg, REG_SP);
+}
+
 /*
- * Convencion de llamadas de la primera version:
- *   x2  = SP para preservar registros del llamador y x14.
- *   x14 = direccion de retorno.
- *   x15 = valor de retorno.
- *   x4-x12 son temporales del generador y se salvan alrededor de CALL.
+ * Comprueba en tiempo de ejecucion que una reserva completa no cruce 0x8000.
+ * Usa x3 y x13 como registros reservados del backend.
+ */
+static int emitir_verificacion_pila(Codegen *cg,
+                                    NodoAST *nodo,
+                                    uint32_t bytes_reserva)
+{
+    char etiqueta_ok[64];
+
+    if (bytes_reserva == 0)
+        return 1;
+
+    nueva_etiqueta(cg, "pila_ok", etiqueta_ok, sizeof(etiqueta_ok));
+    cg->usa_error_pila = 1;
+
+    if (bytes_reserva <= 2047u) {
+        if (!emitir_instruccion(cg, "ALU",
+                                "ADDI x%d, x%d, -%u",
+                                REG_DIRECCION, REG_SP, bytes_reserva))
+            return 0;
+    } else {
+        if (bytes_reserva > INT32_MAX ||
+            !emitir_constante(cg, REG_AUXILIAR, (int32_t)bytes_reserva) ||
+            !emitir_instruccion(cg, "ALU",
+                                "SUB x%d, x%d, x%d",
+                                REG_DIRECCION, REG_SP, REG_AUXILIAR))
+            return 0;
+    }
+
+    if (!emitir_constante(cg, REG_AUXILIAR, (int32_t)LIMITE_PILA) ||
+        !emitir_instruccion(cg, "BRU",
+                            "BGE x%d, x%d, %s",
+                            REG_DIRECCION, REG_AUXILIAR, etiqueta_ok) ||
+        !emitir_instruccion(cg, "BRU", "JMP error_pila") ||
+        !asm_emitir_etiqueta(&cg->emisor, etiqueta_ok)) {
+        error_codegen(cg, nodo, "no se pudo emitir verificacion de pila");
+        return 0;
+    }
+
+    return 1;
+}
+
+/*
+ * Convencion final de llamadas acordada con Fase 3:
+ *   x14 = SP
+ *   x15 = FP
+ *   x2  = valor de retorno
+ *   x3  = auxiliar reservado del backend
+ *   x13 = direccion/scratch reservado del backend
  *
- * Los parametros escalares se copian a las direcciones asignadas por la
- * tabla de simbolos del callee. Esto permite factorial y llamadas normales.
- * La asignacion dinamica de frames para recursividad se integrara cuando la
- * Fase 3 congele offsets de parametros/locales; no se inventa CALL/RET ISA.
+ * Marco del callee:
+ *   0(FP)  -> FP anterior
+ *   4(FP)  -> direccion de retorno
+ *   8(FP)  -> parametro 1
+ *   12(FP) -> parametro 2
+ *   ...
+ *   -4(FP), -8(FP), ... -> variables locales
+ *
+ * El caller guarda x4-x12, coloca argumentos de derecha a izquierda,
+ * coloca la direccion de retorno y salta. El callee restaura la cabecera;
+ * el caller elimina parametros y recupera x4-x12.
  */
 static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
 {
-    NodoAST *funcion;
-    NodoAST *parametros;
-    NodoAST *parametro;
-    NodoAST *argumento;
-    NodoAST *id_parametro;
-    unsigned cantidad_parametros;
-    unsigned cantidad_argumentos;
+    NodoAST *funcion_ast;
+    NodoAST *parametros_ast;
+    NodoAST *p;
+    NodoAST *a;
+    NodoAST *params[MAX_PARAMETROS_FUNCION];
+    NodoAST *args[MAX_PARAMETROS_FUNCION];
+    CodegenSimbolo simbolo_funcion;
+    unsigned cantidad_parametros = 0;
+    unsigned cantidad_argumentos = 0;
+    unsigned i;
+    uint64_t reserva64;
+    uint32_t bytes_reserva;
     int reg;
     int reg_resultado = -1;
     int delta_retorno;
@@ -1330,18 +1553,45 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
         return -1;
     }
 
-    funcion = buscar_funcion_ast(cg, nodo->valor);
-    if (funcion == NULL) {
+    funcion_ast = buscar_funcion_ast(cg, nodo->valor);
+    if (funcion_ast == NULL) {
         error_codegen(cg, nodo, "funcion no encontrada: %s", nodo->valor);
         return -1;
     }
 
-    parametros = hijo_n(funcion, 1);
-    parametro = parametros != NULL ? parametros->hijo : NULL;
-    argumento = nodo->hijo;
+    if (!resolver(cg, nodo, nodo->valor, &simbolo_funcion) ||
+        simbolo_funcion.categoria != CODEGEN_CAT_FUNCION) {
+        error_codegen(cg, nodo,
+                      "no se encontro informacion de memoria para la funcion '%s'",
+                      nodo->valor);
+        return -1;
+    }
 
-    cantidad_parametros = contar_hermanos(parametro);
-    cantidad_argumentos = contar_hermanos(argumento);
+    if (necesita_resultado && funcion_ast->valor != NULL &&
+        strcmp(funcion_ast->valor, "vacio") == 0) {
+        error_codegen(cg, nodo,
+                      "la funcion vacia '%s' no produce un valor",
+                      nodo->valor);
+        return -1;
+    }
+
+    parametros_ast = hijo_n(funcion_ast, 1);
+    for (p = parametros_ast != NULL ? parametros_ast->hijo : NULL;
+         p != NULL; p = p->siguiente) {
+        if (cantidad_parametros >= MAX_PARAMETROS_FUNCION) {
+            error_codegen(cg, nodo, "demasiados parametros en '%s'", nodo->valor);
+            return -1;
+        }
+        params[cantidad_parametros++] = p;
+    }
+
+    for (a = nodo->hijo; a != NULL; a = a->siguiente) {
+        if (cantidad_argumentos >= MAX_PARAMETROS_FUNCION) {
+            error_codegen(cg, nodo, "demasiados argumentos en '%s'", nodo->valor);
+            return -1;
+        }
+        args[cantidad_argumentos++] = a;
+    }
 
     if (cantidad_parametros != cantidad_argumentos) {
         error_codegen(cg, nodo,
@@ -1350,105 +1600,132 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
         return -1;
     }
 
-    if (necesita_resultado && funcion->valor != NULL &&
-        strcmp(funcion->valor, "vacio") == 0) {
+    if (simbolo_funcion.tamano_parametros != cantidad_parametros * 4u) {
         error_codegen(cg, nodo,
-                      "la funcion vacia '%s' no produce un valor",
+                      "tamano de parametros inconsistente para '%s'",
                       nodo->valor);
         return -1;
     }
 
-    asm_emitir_comentario(&cg->emisor, "llamada a %s", nodo->valor);
+    reserva64 = (uint64_t)BYTES_TEMPORALES_GUARDADOS +
+                simbolo_funcion.tamano_parametros +
+                TAMANO_CABECERA +
+                simbolo_funcion.tamano_marco;
+    if (reserva64 > UINT32_MAX) {
+        error_codegen(cg, nodo, "reserva de pila fuera de rango en '%s'",
+                      nodo->valor);
+        return -1;
+    }
+    bytes_reserva = (uint32_t)reserva64;
 
-    /*
-     * Preservar todos los temporales del llamador. Es conservador, pero
-     * garantiza expresiones como a + f(b), porque el cuerpo de f puede usar
-     * los mismos x4-x12. Tambien se preserva x14 para llamadas anidadas.
-     */
-    for (reg = REG_TEMP_PRIMERO; reg <= REG_TEMP_ULTIMO; reg++) {
-        if (!emitir_instruccion(cg, "ALU",
-                                "ADDI x%d, x%d, -4", REG_SP, REG_SP) ||
-            !emitir_instruccion(cg, "LSU",
-                                "STORE x%d, 0(x%d)", reg, REG_SP))
-            return -1;
+    if (!pila_hay_espacio(PILA_INICIAL_DEFECTO,
+                          BYTES_TEMPORALES_GUARDADOS +
+                          simbolo_funcion.tamano_parametros +
+                          simbolo_funcion.tamano_marco,
+                          TAMANO_CABECERA)) {
+        error_codegen(cg, nodo,
+                      "el marco de '%s' no cabe ni con la pila vacia",
+                      nodo->valor);
+        return -1;
     }
 
-    if (!emitir_instruccion(cg, "ALU",
-                            "ADDI x%d, x%d, -4", REG_SP, REG_SP) ||
-        !emitir_instruccion(cg, "LSU",
-                            "STORE x%d, 0(x%d)",
-                            REG_RETORNO_DIRECCION, REG_SP))
+    asm_emitir_comentario(&cg->emisor,
+                          "llamada a %s: caller-save, parametros, retorno",
+                          nodo->valor);
+
+    if (!emitir_verificacion_pila(cg, nodo, bytes_reserva))
         return -1;
 
-    /* Evaluar y copiar los parametros escalares del callee. */
-    while (parametro != NULL && argumento != NULL) {
-        id_parametro = hijo_n(parametro, 0);
+    /* Preservar temporales del caller. */
+    for (reg = REG_TEMP_PRIMERO; reg <= REG_TEMP_ULTIMO; reg++)
+        if (!emitir_push_reg(cg, reg))
+            return -1;
+
+    /*
+     * Colocar argumentos de derecha a izquierda. Asi, despues del prologo
+     * del callee, el primer parametro queda exactamente en 8(FP).
+     */
+    for (i = cantidad_parametros; i > 0; i--) {
+        NodoAST *parametro = params[i - 1];
+        NodoAST *argumento = args[i - 1];
+        NodoAST *id_parametro = hijo_n(parametro, 0);
+        CodegenSimbolo simbolo_parametro;
 
         if (id_parametro == NULL || id_parametro->tipo != AST_VARIABLE ||
-            id_parametro->valor == NULL) {
+            id_parametro->valor == NULL ||
+            !resolver(cg, id_parametro, id_parametro->valor,
+                      &simbolo_parametro)) {
             error_codegen(cg, parametro,
-                          "parametro de funcion sin identificador valido");
+                          "parametro sin informacion semantica valida");
             return -1;
         }
 
-        if (parametro->valor != NULL &&
-            (strstr(parametro->valor, "lista") != NULL ||
-             strstr(parametro->valor, "matriz") != NULL)) {
-            error_codegen(cg, parametro,
-                          "parametros lista/matriz aun requieren convencion por referencia");
-            return -1;
-        }
-
-        reg = generar_expresion(cg, argumento);
-        if (reg < 0)
-            return -1;
-
-        if (!guardar_variable(cg, id_parametro,
-                              id_parametro->valor, reg)) {
+        if (simbolo_parametro.forma == CODEGEN_FORMA_ESCALAR) {
+            reg = generar_expresion(cg, argumento);
+            if (reg < 0)
+                return -1;
+            if (!emitir_push_reg(cg, reg)) {
+                liberar_temp(cg, reg);
+                return -1;
+            }
             liberar_temp(cg, reg);
-            return -1;
-        }
+        } else {
+            CodegenSimbolo simbolo_argumento;
 
-        liberar_temp(cg, reg);
-        parametro = parametro->siguiente;
-        argumento = argumento->siguiente;
+            if (argumento->tipo != AST_VARIABLE || argumento->valor == NULL ||
+                !resolver(cg, argumento, argumento->valor,
+                          &simbolo_argumento)) {
+                error_codegen(cg, argumento,
+                              "un parametro lista/matriz requiere un arreglo como argumento");
+                return -1;
+            }
+
+            if (simbolo_argumento.forma != simbolo_parametro.forma) {
+                error_codegen(cg, argumento,
+                              "forma de arreglo incompatible al llamar '%s'",
+                              nodo->valor);
+                return -1;
+            }
+
+            if (!emitir_base_simbolo(cg, argumento, &simbolo_argumento,
+                                     REG_DIRECCION) ||
+                !emitir_push_reg(cg, REG_DIRECCION))
+                return -1;
+        }
     }
 
-    /*
-     * La instruccion que calcula x14 y el JMP tienen cada una N NOPs.
-     * x1 contiene el PC del bundle ADDI; por eso la continuacion esta a:
-     *     2 * (1 + N) bundles * 16 bytes.
-     */
-    delta_retorno = (int)(2u * (1u + cg->config.nops_dependencia) * 16u);
+    /* Reservar el slot de retorno y calcular su PC real. */
+    if (!emitir_ajuste_sp(cg, -4))
+        return -1;
+
+    delta_retorno = (int)(3u * (1u + cg->config.nops_dependencia) * 16u);
     if (delta_retorno > 2047) {
         error_codegen(cg, nodo,
-                      "la separacion configurada hace que el retorno no quepa en ADDI");
+                      "la separacion de NOP hace que el retorno no quepa en ADDI");
         return -1;
     }
-
-    snprintf(etiqueta_funcion, sizeof(etiqueta_funcion),
-             "func_%s", nodo->valor);
 
     if (!emitir_instruccion(cg, "ALU",
                             "ADDI x%d, x1, %d",
-                            REG_RETORNO_DIRECCION, delta_retorno) ||
-        !emitir_instruccion(cg, "BRU",
-                            "JMP %s", etiqueta_funcion))
+                            REG_AUXILIAR, delta_retorno) ||
+        !emitir_instruccion(cg, "LSU",
+                            "STORE x%d, 0(x%d)", REG_AUXILIAR, REG_SP))
         return -1;
 
-    /* Al regresar, x15 contiene el valor. Restaurar x14 y temporales. */
-    if (!emitir_instruccion(cg, "LSU",
-                            "LOAD x%d, 0(x%d)",
-                            REG_RETORNO_DIRECCION, REG_SP) ||
-        !emitir_instruccion(cg, "ALU",
-                            "ADDI x%d, x%d, 4", REG_SP, REG_SP))
+    snprintf(etiqueta_funcion, sizeof(etiqueta_funcion),
+             "func_%s", nodo->valor);
+    if (!emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_funcion))
         return -1;
 
+    /* El callee retorna con SP apuntando al primer parametro. */
+    if (!emitir_ajuste_sp(cg, (long)simbolo_funcion.tamano_parametros))
+        return -1;
+
+    /* Recuperar temporales del caller en orden inverso. */
     for (reg = REG_TEMP_ULTIMO; reg >= REG_TEMP_PRIMERO; reg--) {
         if (!emitir_instruccion(cg, "LSU",
                                 "LOAD x%d, 0(x%d)", reg, REG_SP) ||
-            !emitir_instruccion(cg, "ALU",
-                                "ADDI x%d, x%d, 4", REG_SP, REG_SP))
+            !emitir_ajuste_sp(cg, 4))
             return -1;
     }
 
@@ -1709,7 +1986,7 @@ static void generar_declaracion_lista(Codegen *cg, NodoAST *nodo)
     for (elemento = inicializador->hijo;
          elemento != NULL;
          elemento = elemento->siguiente, indice++) {
-        uint64_t direccion;
+        uint64_t offset;
 
         if (indice >= simbolo.dimensiones[0]) {
             error_codegen(cg, elemento,
@@ -1718,17 +1995,16 @@ static void generar_declaracion_lista(Codegen *cg, NodoAST *nodo)
             return;
         }
 
-        direccion = (uint64_t)simbolo.direccion +
-                    (uint64_t)indice * TAMANO_ELEMENTO_BYTES;
-        if (direccion > UINT32_MAX) {
+        offset = (uint64_t)indice * TAMANO_ELEMENTO_BYTES;
+        if (offset > UINT32_MAX) {
             error_codegen(cg, elemento,
-                          "direccion fuera de rango al inicializar '%s'",
+                          "offset fuera de rango al inicializar '%s'",
                           variable->valor);
             return;
         }
 
-        if (!guardar_elemento_literal(cg,
-                                      (uint32_t)direccion, elemento))
+        if (!guardar_elemento_literal(cg, variable, &simbolo,
+                                      (uint32_t)offset, elemento))
             return;
     }
 }
@@ -1797,7 +2073,7 @@ static void generar_declaracion_matriz(Codegen *cg, NodoAST *nodo)
              elemento != NULL;
              elemento = elemento->siguiente, indice_columna++) {
             uint64_t indice_lineal;
-            uint64_t direccion;
+            uint64_t offset;
 
             if (indice_columna >= simbolo.dimensiones[1]) {
                 error_codegen(cg, elemento,
@@ -1809,18 +2085,17 @@ static void generar_declaracion_matriz(Codegen *cg, NodoAST *nodo)
             indice_lineal =
                 (uint64_t)indice_fila * simbolo.dimensiones[1] +
                 indice_columna;
-            direccion = (uint64_t)simbolo.direccion +
-                        indice_lineal * TAMANO_ELEMENTO_BYTES;
+            offset = indice_lineal * TAMANO_ELEMENTO_BYTES;
 
-            if (direccion > UINT32_MAX) {
+            if (offset > UINT32_MAX) {
                 error_codegen(cg, elemento,
-                              "direccion fuera de rango al inicializar '%s'",
+                              "offset fuera de rango al inicializar '%s'",
                               variable->valor);
                 return;
             }
 
-            if (!guardar_elemento_literal(cg,
-                                          (uint32_t)direccion, elemento))
+            if (!guardar_elemento_literal(cg, variable, &simbolo,
+                                          (uint32_t)offset, elemento))
                 return;
         }
     }
@@ -2057,6 +2332,7 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *nombre = hijo_n(nodo, 0);
     NodoAST *bloque = hijo_n(nodo, 2);
+    CodegenSimbolo simbolo_funcion;
     const char *funcion_anterior;
     int dentro_anterior;
     char retorno_anterior[96];
@@ -2069,14 +2345,31 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
         return;
     }
 
+    if (!resolver(cg, nodo, nombre->valor, &simbolo_funcion) ||
+        simbolo_funcion.categoria != CODEGEN_CAT_FUNCION) {
+        error_codegen(cg, nodo,
+                      "no se encontro informacion de marco para '%s'",
+                      nombre->valor);
+        return;
+    }
+
+    if (!pila_hay_espacio(PILA_INICIAL_DEFECTO,
+                          simbolo_funcion.tamano_marco,
+                          TAMANO_CABECERA)) {
+        error_codegen(cg, nodo,
+                      "el marco local de '%s' no cabe en la pila",
+                      nombre->valor);
+        return;
+    }
+
     snprintf(etiqueta_funcion, sizeof(etiqueta_funcion),
              "func_%s", nombre->valor);
     snprintf(etiqueta_retorno, sizeof(etiqueta_retorno),
              "ret_%s", nombre->valor);
 
     asm_emitir_comentario(&cg->emisor,
-                          "funcion %s -> retorno en x%d",
-                          nombre->valor, REG_RETORNO_VALOR);
+                          "funcion %s: x14=SP, x15=FP, retorno en x2",
+                          nombre->valor);
     if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_funcion)) {
         cg->errores++;
         return;
@@ -2084,6 +2377,15 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
 
     /* Valor definido incluso si el semantico deja pasar un camino sin return. */
     if (!emitir_constante(cg, REG_RETORNO_VALOR, 0))
+        return;
+
+    /* Prologo: guardar FP anterior, establecer FP y reservar locales. */
+    if (!emitir_ajuste_sp(cg, -4) ||
+        !emitir_instruccion(cg, "LSU",
+                            "STORE x%d, 0(x%d)", REG_FP, REG_SP) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x%d, x0", REG_FP, REG_SP) ||
+        !emitir_ajuste_sp(cg, -(long)simbolo_funcion.tamano_marco))
         return;
 
     funcion_anterior = cg->funcion_actual;
@@ -2102,9 +2404,27 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
     if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_retorno)) {
         cg->errores++;
     } else {
-        /* RET por software: escribir x1 redirige el PC en el hardware real. */
+        /*
+         * Epilogo:
+         *   SP = FP                  descarta locales
+         *   x3 = 0(FP)              FP anterior
+         *   x13 = 4(FP)             direccion de retorno
+         *   SP = FP + 8             descarta cabecera
+         *   FP = x3
+         *   PC = x13                RET por software
+         */
         emitir_instruccion(cg, "ALU",
-                           "ADD x1, x%d, x0", REG_RETORNO_DIRECCION);
+                           "ADD x%d, x%d, x0", REG_SP, REG_FP);
+        emitir_instruccion(cg, "LSU",
+                           "LOAD x%d, 0(x%d)", REG_AUXILIAR, REG_FP);
+        emitir_instruccion(cg, "LSU",
+                           "LOAD x%d, 4(x%d)", REG_DIRECCION, REG_FP);
+        emitir_instruccion(cg, "ALU",
+                           "ADDI x%d, x%d, 8", REG_SP, REG_FP);
+        emitir_instruccion(cg, "ALU",
+                           "ADD x%d, x%d, x0", REG_FP, REG_AUXILIAR);
+        emitir_instruccion(cg, "ALU",
+                           "ADD x1, x%d, x0", REG_DIRECCION);
     }
 
     cg->funcion_actual = funcion_anterior;
@@ -2116,7 +2436,16 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
 
 static void generar_principal(Codegen *cg, NodoAST *nodo)
 {
+    CodegenSimbolo simbolo_principal;
+
     cg->encontro_principal = 1;
+
+    if (!resolver(cg, nodo, "principal", &simbolo_principal) ||
+        simbolo_principal.categoria != CODEGEN_CAT_FUNCION) {
+        error_codegen(cg, nodo,
+                      "no se encontro informacion de memoria de principal");
+        return;
+    }
 
     if (!asm_emitir_etiqueta(&cg->emisor, "principal")) {
         cg->errores++;
@@ -2126,24 +2455,37 @@ static void generar_principal(Codegen *cg, NodoAST *nodo)
     cg->funcion_actual = "principal";
     cg->dentro_funcion = 0;
 
+    /* principal no tiene caller: FP comienza igual a SP. */
+    if (!emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x%d, x0", REG_FP, REG_SP) ||
+        !emitir_verificacion_pila(cg, nodo,
+                                  simbolo_principal.tamano_marco) ||
+        !emitir_ajuste_sp(cg, -(long)simbolo_principal.tamano_marco))
+        return;
+
     generar_nodo(cg, hijo_n(nodo, 0));
 
-    /* principal no retorna a un llamador: termina en el lazo final. */
+    /* Descartar locales de principal y finalizar. */
+    emitir_instruccion(cg, "ALU",
+                       "ADD x%d, x%d, x0", REG_SP, REG_FP);
     emitir_instruccion(cg, "BRU", "JMP fin_programa");
 }
 
 static void generar_programa(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *actual;
-    uint32_t pila_inicial = PILA_INICIAL_DEFECTO;
 
     asm_emitir_comentario(&cg->emisor,
-                          "inicio: x2=SP, x14=retorno, x15=valor de retorno");
-    if (!emitir_constante(cg, REG_SP, (int32_t)pila_inicial) ||
-        !emitir_constante(cg, REG_RETORNO_DIRECCION, 0))
+                          "convencion: x2=retorno, x14=SP, x15=FP");
+    asm_emitir_comentario(&cg->emisor,
+                          "pila: 0x8000..0xFFFF, SP inicial=0x10000");
+
+    if (!emitir_constante(cg, REG_SP, (int32_t)PILA_INICIAL_DEFECTO) ||
+        !emitir_instruccion(cg, "ALU",
+                            "ADD x%d, x%d, x0", REG_FP, REG_SP))
         return;
 
-    /* Primera pasada: inicializaciones globales antes de saltar a principal. */
+    /* Primera pasada: inicializaciones globales antes de principal. */
     for (actual = nodo->hijo; actual != NULL; actual = actual->siguiente) {
         if (actual->tipo != AST_FUNCION &&
             actual->tipo != AST_PRINCIPAL &&
@@ -2151,15 +2493,13 @@ static void generar_programa(Codegen *cg, NodoAST *nodo)
             generar_nodo(cg, actual);
     }
 
-    /* Nunca se debe caer secuencialmente dentro de una funcion. */
     if (!emitir_instruccion(cg, "BRU", "JMP principal"))
         return;
 
-    /* Segunda pasada: cuerpos de funciones. */
-    for (actual = nodo->hijo; actual != NULL; actual = actual->siguiente) {
+    /* Segunda pasada: funciones normales. */
+    for (actual = nodo->hijo; actual != NULL; actual = actual->siguiente)
         if (actual->tipo == AST_FUNCION)
             generar_funcion(cg, actual);
-    }
 
     /* Tercera pasada: punto de entrada. */
     for (actual = nodo->hijo; actual != NULL; actual = actual->siguiente) {
@@ -2277,6 +2617,11 @@ int codegen_generar_archivo(NodoAST *raiz,
     asm_emitir_etiqueta(&cg.emisor, "fin_programa");
     /* Etiqueta pendiente de resolver por la Fase 5. */
     asm_emitir_bundle(&cg.emisor, "BRU: JMP fin_programa");
+
+    if (cg.usa_error_pila) {
+        asm_emitir_etiqueta(&cg.emisor, "error_pila");
+        asm_emitir_bundle(&cg.emisor, "BRU: JMP error_pila");
+    }
 
     asm_emitter_cerrar(&cg.emisor);
 

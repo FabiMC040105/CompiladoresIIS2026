@@ -9,7 +9,7 @@ PARSER := parser.y
 CFLAGS := -Wall -Wextra -g -O0
 BISONFLAGS := -d -Wall
 
-.PHONY: all run clean rebuild test-codegen
+.PHONY: all run clean rebuild
 
 # Archivo de prueba que se usa si no se indica otro
 FILE ?= pru1.txt
@@ -17,18 +17,21 @@ FILE ?= pru1.txt
 all: $(TARGET)
 
 # Generar el parser y su archivo de cabecera
-parser.tab.c: $(PARSER) ast.h
+parser.tab.c: $(PARSER) ast.h tabla_simbolos.h codegen.h codegen_tabla.h
 	$(BISON) $(BISONFLAGS) -o $@ $(PARSER)
 
 # Generar el lexer usando los tokens de Bison
-lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h
+lex.yy.c: $(LEXER) parser.tab.c parser.tab.h ast.h 
 	$(FLEX) -o $@ $(LEXER)
 
 # Compilar el lexer, el parser y las funciones del AST
-$(TARGET): parser.tab.c lex.yy.c ast.c asm_emitter.c codegen.c \
-          ast.h asm_emitter.h codegen.h
+$(TARGET): parser.tab.c lex.yy.c ast.c ast.h \
+          tabla_simbolos.c tabla_simbolos.h memoria.c memoria.h \
+          asm_emitter.c asm_emitter.h codegen.c codegen.h \
+          codegen_tabla.c codegen_tabla.h
 	$(CC) $(CFLAGS) -o $@ \
-	    parser.tab.c lex.yy.c ast.c asm_emitter.c codegen.c
+	    parser.tab.c lex.yy.c ast.c tabla_simbolos.c memoria.c \
+	    asm_emitter.c codegen.c codegen_tabla.c
 
 # Ejecutar el compilador con un archivo de prueba
 run: $(TARGET)
@@ -39,11 +42,6 @@ rebuild:
 	$(MAKE) clean
 	$(MAKE) all
 
-test-codegen:
-	$(CC) $(CFLAGS) -std=c11 -o test_codegen \
-		test_codegen.c ast.c asm_emitter.c codegen.c
-	./test_codegen
-
 # Eliminar los archivos generados
 clean:
-	rm -f $(TARGET) $(TARGET).exe parser.tab.c parser.tab.h lex.yy.c
+	rm -f $(TARGET) $(TARGET).exe parser.tab.c parser.tab.h lex.yy.c salida.asm

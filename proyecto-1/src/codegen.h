@@ -4,38 +4,57 @@
 #include <stdint.h>
 #include "ast.h"
 
-/*
- * Forma minima que Fase 4 necesita conocer de cada simbolo.
- * Los valores empiezan en cero para conservar compatibilidad con los
- * resolvedores de las pruebas anteriores, donde todo era escalar.
- */
 typedef enum {
     CODEGEN_FORMA_ESCALAR = 0,
     CODEGEN_FORMA_LISTA,
     CODEGEN_FORMA_MATRIZ
 } CodegenForma;
 
+typedef enum {
+    CODEGEN_CAT_VARIABLE = 0,
+    CODEGEN_CAT_PARAMETRO,
+    CODEGEN_CAT_FUNCION
+} CodegenCategoria;
+
+typedef enum {
+    CODEGEN_UBICACION_GLOBAL = 0,
+    CODEGEN_UBICACION_LOCAL,
+    CODEGEN_UBICACION_PARAMETRO,
+    CODEGEN_UBICACION_FUNCION
+} CodegenUbicacion;
+
+/*
+ * Vista de un simbolo que necesita el backend.
+ * direccion es firmada porque los locales usan offsets negativos respecto a FP.
+ */
 typedef struct {
     const char *nombre;
-    uint32_t direccion;
+    long direccion;
     const char *tipo;
 
     CodegenForma forma;
     unsigned cantidad_dimensiones;
     uint32_t dimensiones[2];
+
+    CodegenCategoria categoria;
+    CodegenUbicacion ubicacion;
+    uint32_t tamano_bytes;
+
+    /* Solo tienen significado para SIM_FUNCION. */
+    uint32_t tamano_parametros;
+    uint32_t tamano_locales;
+    uint32_t tamano_marco;
+
+    /* Parametros lista/matriz contienen una direccion de 4 bytes. */
+    int parametro_por_referencia;
 } CodegenSimbolo;
 
-/* Resolvedor legado: suficiente para pruebas simples sin shadowing. */
+/* Compatibilidad con pruebas antiguas sin informacion de ambito. */
 typedef int (*CodegenResolverSimbolo)(void *contexto,
                                       const char *nombre,
                                       CodegenSimbolo *salida);
 
-/*
- * Resolvedor recomendado para la integracion real con Fase 3.
- * Recibe el nodo identificador concreto del AST, lo que permite usar
- * la marca nodo->ambito que ya mantiene el parser/semantico y resolver
- * correctamente nombres repetidos en ambitos distintos.
- */
+/* Resolvedor recomendado para la integracion con la Fase 3. */
 typedef int (*CodegenResolverSimboloNodo)(void *contexto,
                                           const NodoAST *nodo_identificador,
                                           const char *nombre,
