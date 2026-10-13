@@ -3,7 +3,7 @@ CC := gcc
 FLEX := flex
 BISON := bison
 
-TARGET := compilador
+TARGET := cdff
 LEXER := lexer.l
 PARSER := parser.y
 
@@ -13,7 +13,8 @@ BISONFLAGS := -d -Wall
 .PHONY: all run clean rebuild
 
 # Archivo de prueba por defecto
-FILE ?= pru1.txt
+FILE ?= factorial.e
+ARGS ?=
 
 all: $(TARGET)
 
@@ -41,7 +42,7 @@ $(TARGET): parser.tab.c lex.yy.c ast.c ast.h \
 
 # Ejecutar el compilador con un archivo
 run: $(TARGET)
-	./$(TARGET) < $(FILE)
+	./$(TARGET) $(ARGS) $(FILE)
 
 # Reconstruir el proyecto
 rebuild:
@@ -50,4 +51,6 @@ rebuild:
 
 # Eliminar archivos generados
 clean:
-	rm -f $(TARGET) $(TARGET).exe parser.tab.c parser.tab.h lex.yy.c salida.asm
+	rm -f cdff cdff.exe compilador compilador.exe \
+	      parser.tab.c parser.tab.h lex.yy.c \
+	      salida.asm *.asm
