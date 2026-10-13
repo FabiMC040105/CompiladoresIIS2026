@@ -25,7 +25,12 @@ TablaSimbolos *tabla = NULL;
 int opcion_verbose = 0;
 int opcion_ast = 0;
 int opcion_simbolos = 0;
+int opcion_asm = 0;
+int opcion_paquetes = 0;
+int opcion_ensamblar = 0;
+
 char ruta_asm[1024];
+char ruta_bin[1024];
 
 /* Contextos de firmas: se preparan desde Flex al reconocer la cabecera.
  * Se registran como simbolos en las acciones existentes de Bison.
@@ -729,7 +734,7 @@ Unidades
       {
           $$ = $2;
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1471,8 +1476,10 @@ int main(int argc, char *argv[])
         if (opcion_verbose)
             printf("\nPrograma sintacticamente correcto.\n");
 
+        if (opcion_verbose)
+            printf("\n[FASE 3] Asignando direcciones de memoria...\n");
 
-        /* Asignar las direcciones de memoria (Camila) */
+        /* Asignar las direcciones de memoria */
         if (ts_asignar_direcciones_globales(tabla) != TS_OK)
         {
             fprintf(stderr,
@@ -1508,6 +1515,15 @@ int main(int argc, char *argv[])
             /* Primero ejecutar el analisis semantico */
             if (opcion_verbose)
                 printf("\nIniciando analisis semantico...\n");
+            
+            if (opcion_verbose)
+            {
+                if (errores_semanticos == 0)
+                    printf("[FASE 4] Analisis semantico finalizado sin errores.\n");
+                else
+                    printf("[FASE 4] Analisis semantico finalizado con %d errores.\n",
+                        errores_semanticos);
+            }
 
             errores_semanticos += semantico_analizar(
                 raiz,
@@ -1530,6 +1546,9 @@ int main(int argc, char *argv[])
                     codegen_resolver_desde_tabla;
                 config_codegen.contexto_simbolos =
                     &contexto_codegen;
+
+                if (opcion_verbose)
+                    printf("[FASE 5] Generando codigo ensamblador...\n");
 
                 if (!codegen_generar_archivo(
                         raiz, ruta_asm, &config_codegen))

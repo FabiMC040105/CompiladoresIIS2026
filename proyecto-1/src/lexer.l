@@ -1,5 +1,6 @@
 %option noyywrap
 %option yylineno
+%option noinput nounput
 %x COMENTARIO 
 /* 
 1. noyywrap: termina el análisis al llegar al final del archivo.
