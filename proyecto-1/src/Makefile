@@ -10,13 +10,13 @@ PARSER := parser.y
 CFLAGS := -Wall -Wextra -g -O0
 BISONFLAGS := -d -Wall
 
-.PHONY: all run clean rebuild
+.PHONY: all run clean rebuild resolver test-etiquetas test-resolucion test-integracion-etiquetas
 
 # Archivo de prueba por defecto
 FILE ?= factorial.e
 ARGS ?=
 
-all: $(TARGET)
+all: $(TARGET) resolver_asm
 
 # Generar parser con Bison
 parser.tab.c: $(PARSER) ast.h tabla_simbolos.h semantico.h codegen.h codegen_tabla.h scheduler.h
