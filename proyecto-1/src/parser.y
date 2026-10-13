@@ -11,6 +11,8 @@
 #include "semantico.h"
 #include "codegen.h"
 #include "codegen_tabla.h"
+#include "resolucion_etiquetas.h"
+#include "binario.h"
 
 int yylex(void);
 extern int yylineno;
@@ -1379,38 +1381,116 @@ void yyerror(const char *s)
             s);
 }
 
+static void mostrar_uso(FILE *f)
+{
+    fprintf(f,
+        "Uso:\n"
+        "  cdff [opciones] <archivo.e>\n"
+        "  cdff -x <archivo.asm> [-o salida.bin] [-p]\n\n"
+        "Opciones:\n"
+        "  -v              Modo detallado: muestra las fases y decisiones importantes.\n"
+        "  -t              Imprime el AST y genera arbol.dot.\n"
+        "  -m              Imprime tabla de simbolos, ambitos y firmas.\n"
+        "  -o <archivo>    Nombre del archivo binario de salida.\n"
+        "  -s              Conserva tambien el ensamblador final (.asm).\n"
+        "  -x <archivo>    Ensambla directamente un archivo .asm a codigo maquina.\n"
+        "  -p              Muestra cada paquete en ASM, HEX y binario.\n"
+        "  -h, --help      Muestra esta ayuda.\n");
+}
+
+static int construir_ruta_con_extension(const char *entrada,
+                                         const char *extension,
+                                         char *salida,
+                                         size_t capacidad)
+{
+    char *punto;
+    char *barra1;
+    char *barra2;
+    char *barra;
+
+    if (entrada == NULL || extension == NULL || salida == NULL)
+        return 0;
+
+    if (snprintf(salida, capacidad, "%s", entrada) >= (int)capacidad)
+        return 0;
+
+    punto = strrchr(salida, '.');
+    barra1 = strrchr(salida, '/');
+    barra2 = strrchr(salida, '\\');
+    barra = barra1;
+    if (barra2 != NULL && (barra == NULL || barra2 > barra))
+        barra = barra2;
+
+    if (punto != NULL && (barra == NULL || punto > barra))
+        *punto = '\0';
+
+    if (strlen(salida) + strlen(extension) >= capacidad)
+        return 0;
+
+    strcat(salida, extension);
+    return 1;
+}
+
+static int copiar_ruta(const char *origen, char *destino, size_t capacidad)
+{
+    return snprintf(destino, capacidad, "%s", origen) < (int)capacidad;
+}
+
 int main(int argc, char *argv[])
 {
     int resultado;
-    
     const char *archivo_fuente = NULL;
+    const char *archivo_asm_directo = NULL;
+    const char *salida_solicitada = NULL;
     int i;
     FILE *entrada = NULL;
+    char ruta_asm_intermedia[1024];
 
-    /* Leer las opciones y encontrar el archivo fuente. */
+    /* ------------------------------------------------------------
+     * Procesamiento de opciones de linea de comandos.
+     * ------------------------------------------------------------ */
     for (i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-v") == 0)
-        {
             opcion_verbose = 1;
-        }
         else if (strcmp(argv[i], "-t") == 0)
-        {
             opcion_ast = 1;
-        }
         else if (strcmp(argv[i], "-m") == 0)
-        {
             opcion_simbolos = 1;
+        else if (strcmp(argv[i], "-s") == 0)
+            opcion_asm = 1;
+        else if (strcmp(argv[i], "-p") == 0)
+            opcion_paquetes = 1;
+        else if (strcmp(argv[i], "-o") == 0)
+        {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: -o requiere un archivo de salida.\n");
+                return EXIT_FAILURE;
+            }
+            salida_solicitada = argv[i];
+        }
+        else if (strcmp(argv[i], "-x") == 0)
+        {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: -x requiere un archivo .asm.\n");
+                return EXIT_FAILURE;
+            }
+            opcion_ensamblar = 1;
+            archivo_asm_directo = argv[i];
+        }
+        else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
+        {
+            mostrar_uso(stdout);
+            return EXIT_SUCCESS;
         }
         else if (argv[i][0] == '-')
         {
             fprintf(stderr, "Error: opcion desconocida: %s\n", argv[i]);
+            mostrar_uso(stderr);
             return EXIT_FAILURE;
         }
         else if (archivo_fuente == NULL)
-        {
             archivo_fuente = argv[i];
-        }
         else
         {
             fprintf(stderr, "Error: se indico mas de un archivo fuente.\n");
@@ -1418,54 +1498,88 @@ int main(int argc, char *argv[])
         }
     }
 
-    
+    if (opcion_ensamblar)
+    {
+        if (archivo_fuente != NULL) {
+            fprintf(stderr, "Error: -x no se combina con un archivo fuente .e.\n");
+            return EXIT_FAILURE;
+        }
+
+        if (salida_solicitada != NULL) {
+            if (!copiar_ruta(salida_solicitada, ruta_bin, sizeof(ruta_bin))) {
+                fprintf(stderr, "Error: ruta de salida demasiado larga.\n");
+                return EXIT_FAILURE;
+            }
+        } else if (!construir_ruta_con_extension(
+                       archivo_asm_directo, ".bin", ruta_bin, sizeof(ruta_bin))) {
+            fprintf(stderr, "Error: ruta de salida demasiado larga.\n");
+            return EXIT_FAILURE;
+        }
+
+        if (opcion_verbose)
+            printf("[FASE 6] Ensamblando %s -> %s\n",
+                   archivo_asm_directo, ruta_bin);
+
+        return binario_ensamblar_archivo(
+                   archivo_asm_directo,
+                   ruta_bin,
+                   opcion_paquetes,
+                   stdout)
+               ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+
     if (archivo_fuente == NULL)
     {
-        fprintf(stderr,
-                "Uso: cdff [opciones] <archivo.e>\n"
-                "Opciones: -v -t -m\n");
+        mostrar_uso(stderr);
         return EXIT_FAILURE;
     }
 
-    /* Obtener el nombre de salida reemplazando .e por .asm. */
-    if (snprintf(ruta_asm, sizeof(ruta_asm), "%s", archivo_fuente)
-            >= (int)sizeof(ruta_asm))
+    if (!construir_ruta_con_extension(
+            archivo_fuente, ".intermedio.asm",
+            ruta_asm_intermedia, sizeof(ruta_asm_intermedia)) ||
+        !construir_ruta_con_extension(
+            archivo_fuente, ".asm", ruta_asm, sizeof(ruta_asm)))
     {
         fprintf(stderr, "Error: la ruta del archivo es demasiado larga.\n");
         return EXIT_FAILURE;
     }
 
-    char *extension = strrchr(ruta_asm, '.');
-
-    if (extension != NULL && strcmp(extension, ".e") == 0)
-        *extension = '\0';
-
-    if (strlen(ruta_asm) + strlen(".asm") >= sizeof(ruta_asm))
-    {
-        fprintf(stderr, "Error: la ruta de salida es demasiado larga.\n");
+    if (salida_solicitada != NULL) {
+        if (!copiar_ruta(salida_solicitada, ruta_bin, sizeof(ruta_bin))) {
+            fprintf(stderr, "Error: ruta de salida demasiado larga.\n");
+            return EXIT_FAILURE;
+        }
+    } else if (!construir_ruta_con_extension(
+                   archivo_fuente, ".bin", ruta_bin, sizeof(ruta_bin))) {
+        fprintf(stderr, "Error: la ruta binaria es demasiado larga.\n");
         return EXIT_FAILURE;
     }
 
-    strcat(ruta_asm, ".asm");
+    if (strcmp(ruta_asm, ruta_bin) == 0 ||
+        strcmp(ruta_asm_intermedia, ruta_bin) == 0)
+    {
+        fprintf(stderr, "Error: el archivo binario no puede usar la misma ruta que el ASM.\n");
+        return EXIT_FAILURE;
+    }
 
     entrada = fopen(archivo_fuente, "r");
-
-
     if (entrada == NULL)
     {
         perror("Error al abrir el archivo fuente");
         return EXIT_FAILURE;
     }
-
     yyin = entrada;
 
-    /* Paso 1: inicializar la tabla antes de iniciar Bison. */
     tabla = ts_crear();
     if (tabla == NULL)
     {
         fprintf(stderr, "Error: no se pudo crear la tabla de simbolos.\n");
+        fclose(entrada);
         return EXIT_FAILURE;
     }
+
+    if (opcion_verbose)
+        printf("[FASES 1-2] Analisis lexico, sintactico y construccion del AST...\n");
 
     resultado = yyparse();
     fclose(entrada);
@@ -1477,52 +1591,22 @@ int main(int argc, char *argv[])
             printf("\nPrograma sintacticamente correcto.\n");
 
         if (opcion_verbose)
-            printf("\n[FASE 3] Asignando direcciones de memoria...\n");
+            printf("[FASE 3] Asignando memoria y ejecutando analisis semantico...\n");
 
-        /* Asignar las direcciones de memoria */
         if (ts_asignar_direcciones_globales(tabla) != TS_OK)
         {
             fprintf(stderr,
                     "Error: no se pudieron asignar las direcciones globales.\n");
-
-            if (raiz != NULL)
-            {
-                ast_liberar(raiz);
-                raiz = NULL;
-            }
-
-            parser_liberar_marcas();
-            parser_liberar_contextos_funciones();
-            ts_destruir(tabla);
-            tabla = NULL;
-
-            return EXIT_FAILURE;
+            goto error_compilacion;
         }
 
-        /* Construir y analizar el AST */
         if (raiz != NULL)
         {
             if (opcion_ast)
             {
                 printf("\nArbol de sintaxis abstracta:\n");
                 ast_imprimir_consola(raiz, 0);
-
-                /* Conservar tambien la exportacion a Graphviz. */
                 ast_imprimir(raiz, 0);
-            }
-
-
-            /* Primero ejecutar el analisis semantico */
-            if (opcion_verbose)
-                printf("\nIniciando analisis semantico...\n");
-            
-            if (opcion_verbose)
-            {
-                if (errores_semanticos == 0)
-                    printf("[FASE 4] Analisis semantico finalizado sin errores.\n");
-                else
-                    printf("[FASE 4] Analisis semantico finalizado con %d errores.\n",
-                        errores_semanticos);
             }
 
             errores_semanticos += semantico_analizar(
@@ -1532,7 +1616,15 @@ int main(int argc, char *argv[])
                 NULL
             );
 
-            /* Generar ensamblador solo si no hay errores */
+            if (opcion_verbose)
+            {
+                if (errores_semanticos == 0)
+                    printf("[FASE 3] Analisis semantico finalizado sin errores.\n");
+                else
+                    printf("[FASE 3] Analisis semantico finalizado con %d errores.\n",
+                           errores_semanticos);
+            }
+
             if (errores_semanticos == 0)
             {
                 CodegenTablaContexto contexto_codegen;
@@ -1548,35 +1640,55 @@ int main(int argc, char *argv[])
                     &contexto_codegen;
 
                 if (opcion_verbose)
-                    printf("[FASE 5] Generando codigo ensamblador...\n");
+                    printf("[FASE 4] Generando ensamblador y calendarizando dependencias...\n");
 
                 if (!codegen_generar_archivo(
-                        raiz, ruta_asm, &config_codegen))
+                        raiz, ruta_asm_intermedia, &config_codegen))
                 {
                     fprintf(stderr,
                             "Error: fallo la generacion de ensamblador.\n");
-
-                    ast_liberar(raiz);
-                    raiz = NULL;
-
-                    parser_liberar_marcas();
-                    parser_liberar_contextos_funciones();
-                    ts_destruir(tabla);
-                    tabla = NULL;
-
-                    return EXIT_FAILURE;
+                    goto error_compilacion;
                 }
 
                 if (opcion_verbose)
-                    printf("\nEnsamblador generado: %s\n", ruta_asm);
+                    printf("[FASE 5] Resolviendo etiquetas y offsets...\n");
+
+                if (!resolver_etiquetas_asm(
+                        ruta_asm_intermedia,
+                        ruta_asm,
+                        opcion_verbose ? stdout : NULL))
+                {
+                    fprintf(stderr,
+                            "Error: fallo la resolucion de etiquetas.\n");
+                    goto error_compilacion;
+                }
+
+                if (opcion_verbose)
+                    printf("[FASE 6] Generando codigo maquina...\n");
+
+                if (!binario_ensamblar_archivo(
+                        ruta_asm,
+                        ruta_bin,
+                        opcion_paquetes,
+                        stdout))
+                {
+                    fprintf(stderr,
+                            "Error: fallo la generacion del archivo binario.\n");
+                    goto error_compilacion;
+                }
+
+                remove(ruta_asm_intermedia);
+
+                if (!opcion_asm)
+                    remove(ruta_asm);
+                else if (opcion_verbose)
+                    printf("Ensamblador conservado: %s\n", ruta_asm);
             }
 
             ast_liberar(raiz);
             raiz = NULL;
         }
 
-
-        /* Mostrar la informacion de simbolos solo con -m. */
         if (opcion_simbolos)
         {
             printf("\nTabla de simbolos:\n");
@@ -1600,15 +1712,19 @@ int main(int argc, char *argv[])
         return errores_semanticos == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
-    printf("Programa sintacticamente incorrecto.\n");
-
-    /*
-     * Si el análisis falla antes de reducir Programa,
-     * Bison libera los valores semánticos descartados mediante
-     * los destructores definidos arriba.
-     */
+    fprintf(stderr, "Programa sintacticamente incorrecto.\n");
     raiz = NULL;
+    parser_liberar_marcas();
+    parser_liberar_contextos_funciones();
+    ts_destruir(tabla);
+    tabla = NULL;
+    return EXIT_FAILURE;
 
+error_compilacion:
+    if (raiz != NULL) {
+        ast_liberar(raiz);
+        raiz = NULL;
+    }
     parser_liberar_marcas();
     parser_liberar_contextos_funciones();
     ts_destruir(tabla);

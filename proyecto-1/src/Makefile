@@ -16,9 +16,9 @@ ARGS ?=
 ENTRADA ?=
 SALIDA ?=
 
-.PHONY: all help run clean rebuild resolver arbol ast test\
-        test test-etiquetas test-resolucion \
-        test-integracion-etiquetas \
+.PHONY: all help run clean rebuild resolver arbol ast test \
+        test-etiquetas test-resolucion test-integracion-etiquetas \
+        test-binario
 
 all: $(TARGET) resolver_asm
 
@@ -39,6 +39,9 @@ help:
 	  '  make run FILE=factorial.e ARGS="-v"' \
 	  '  make run FILE=factorial.e ARGS="-v -m"' \
 	  '  make run FILE=factorial.e ARGS="-t"' \
+	  '  make run FILE=factorial.e ARGS="-s -o factorial.bin"' \
+	  '  make run FILE=factorial.e ARGS="-p"' \
+	  '  ./cdff -x programa.asm -o programa.bin' \
 	  '' \
 	  'Pruebas de etiquetas y saltos:' \
 	  '  make test-etiquetas' \
@@ -51,15 +54,15 @@ help:
 	  'Visualizar el AST con Graphviz:' \
 	  '  dot -Tpng arbol.dot -o arbol.png' \
 	  '' \
-	  'Ensamblador Python de la arquitectura:' \
-	  '  python3 RUTA/assembler.py programa.asm -o programa.mem' \
+	  'Opciones implementadas en cdff:' \
+	  '  -v -t -m -o -s -x -p' \
 	  '' \
-	  'Nota: sustituya RUTA por la ubicacion real de assembler.py.' \
-	  'Consulte ./cdff --help cuando esa opcion este implementada.'
+	  'Use ./cdff --help para ver la descripcion completa.'
 
 # Generar parser con Bison.
 parser.tab.c: $(PARSER) ast.h tabla_simbolos.h semantico.h \
-              codegen.h codegen_tabla.h scheduler.h
+              codegen.h codegen_tabla.h scheduler.h \
+              resolucion_etiquetas.h etiquetas.h binario.h
 	$(BISON) $(BISONFLAGS) -o $@ $(PARSER)
 
 # Generar lexer con Flex.
@@ -74,11 +77,15 @@ $(TARGET): parser.tab.c lex.yy.c ast.c ast.h \
            asm_emitter.c asm_emitter.h \
            scheduler.c scheduler.h \
            codegen.c codegen.h \
-           codegen_tabla.c codegen_tabla.h
+           codegen_tabla.c codegen_tabla.h \
+           resolucion_etiquetas.c resolucion_etiquetas.h \
+           etiquetas.c etiquetas.h \
+           binario.c binario.h
 	$(CC) $(CFLAGS) -o $@ \
 	    parser.tab.c lex.yy.c ast.c \
 	    tabla_simbolos.c memoria.c semantico.c \
-	    asm_emitter.c scheduler.c codegen.c codegen_tabla.c
+	    asm_emitter.c scheduler.c codegen.c codegen_tabla.c \
+	    resolucion_etiquetas.c etiquetas.c binario.c
 
 # Compilar el programa auxiliar de resolucion de etiquetas.
 resolver_asm: resolver_asm_main.c \
@@ -136,7 +143,15 @@ test-resolucion: prueba_resolucion_asm
 test-integracion-etiquetas: test-resolucion
 
 # Ejecutar ambas suites de pruebas.
-test: test-etiquetas test-resolucion
+test: test-etiquetas test-resolucion test-binario
+
+# Prueba del codificador binario integrado.
+prueba_binario: prueba_binario.c binario.c binario.h
+	$(CC) $(CFLAGS) -o $@ prueba_binario.c binario.c
+
+# Ejecutar la prueba del ensamblador/binario.
+test-binario: prueba_binario
+	./prueba_binario
 
 # Reconstruir los ejecutables.
 rebuild:
@@ -147,6 +162,6 @@ rebuild:
 # Se conservan los archivos .asm y .bin para no borrar resultados utiles.
 clean:
 	rm -f cdff cdff.exe compilador compilador.exe resolver_asm \
-	      prueba_etiquetas prueba_resolucion_asm \
+	      prueba_etiquetas prueba_resolucion_asm prueba_binario \
 	      parser.tab.c parser.tab.h lex.yy.c \
 	      prueba_etiquetas_entrada.tmp prueba_etiquetas_resuelta.tmp
