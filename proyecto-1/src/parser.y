@@ -15,9 +15,17 @@
 int yylex(void);
 extern int yylineno;
 void yyerror(const char *s);
+extern FILE *yyin;
 
 NodoAST *raiz = NULL;
 TablaSimbolos *tabla = NULL;
+
+
+/* Opciones recibidas desde la terminal. */
+int opcion_verbose = 0;
+int opcion_ast = 0;
+int opcion_simbolos = 0;
+char ruta_asm[1024];
 
 /* Contextos de firmas: se preparan desde Flex al reconocer la cabecera.
  * Se registran como simbolos en las acciones existentes de Bison.
@@ -1366,9 +1374,85 @@ void yyerror(const char *s)
             s);
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
     int resultado;
+    
+    const char *archivo_fuente = NULL;
+    int i;
+    FILE *entrada = NULL;
+
+    /* Leer las opciones y encontrar el archivo fuente. */
+    for (i = 1; i < argc; i++)
+    {
+        if (strcmp(argv[i], "-v") == 0)
+        {
+            opcion_verbose = 1;
+        }
+        else if (strcmp(argv[i], "-t") == 0)
+        {
+            opcion_ast = 1;
+        }
+        else if (strcmp(argv[i], "-m") == 0)
+        {
+            opcion_simbolos = 1;
+        }
+        else if (argv[i][0] == '-')
+        {
+            fprintf(stderr, "Error: opcion desconocida: %s\n", argv[i]);
+            return EXIT_FAILURE;
+        }
+        else if (archivo_fuente == NULL)
+        {
+            archivo_fuente = argv[i];
+        }
+        else
+        {
+            fprintf(stderr, "Error: se indico mas de un archivo fuente.\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    
+    if (archivo_fuente == NULL)
+    {
+        fprintf(stderr,
+                "Uso: cdff [opciones] <archivo.e>\n"
+                "Opciones: -v -t -m\n");
+        return EXIT_FAILURE;
+    }
+
+    /* Obtener el nombre de salida reemplazando .e por .asm. */
+    if (snprintf(ruta_asm, sizeof(ruta_asm), "%s", archivo_fuente)
+            >= (int)sizeof(ruta_asm))
+    {
+        fprintf(stderr, "Error: la ruta del archivo es demasiado larga.\n");
+        return EXIT_FAILURE;
+    }
+
+    char *extension = strrchr(ruta_asm, '.');
+
+    if (extension != NULL && strcmp(extension, ".e") == 0)
+        *extension = '\0';
+
+    if (strlen(ruta_asm) + strlen(".asm") >= sizeof(ruta_asm))
+    {
+        fprintf(stderr, "Error: la ruta de salida es demasiado larga.\n");
+        return EXIT_FAILURE;
+    }
+
+    strcat(ruta_asm, ".asm");
+
+    entrada = fopen(archivo_fuente, "r");
+
+
+    if (entrada == NULL)
+    {
+        perror("Error al abrir el archivo fuente");
+        return EXIT_FAILURE;
+    }
+
+    yyin = entrada;
 
     /* Paso 1: inicializar la tabla antes de iniciar Bison. */
     tabla = ts_crear();
@@ -1379,10 +1463,13 @@ int main(void)
     }
 
     resultado = yyparse();
+    fclose(entrada);
+    entrada = NULL;
 
     if (resultado == 0)
     {
-        printf("\nPrograma sintacticamente correcto.\n");
+        if (opcion_verbose)
+            printf("\nPrograma sintacticamente correcto.\n");
 
 
         /* Asignar las direcciones de memoria (Camila) */
@@ -1408,12 +1495,19 @@ int main(void)
         /* Construir y analizar el AST */
         if (raiz != NULL)
         {
-            printf("\nArbol de sintaxis abstracta:\n");
-            ast_imprimir(raiz, 0);
+            if (opcion_ast)
+            {
+                printf("\nArbol de sintaxis abstracta:\n");
+                ast_imprimir_consola(raiz, 0);
+
+                /* Conservar tambien la exportacion a Graphviz. */
+                ast_imprimir(raiz, 0);
+            }
 
 
             /* Primero ejecutar el analisis semantico */
-            printf("\nIniciando analisis semantico...\n");
+            if (opcion_verbose)
+                printf("\nIniciando analisis semantico...\n");
 
             errores_semanticos += semantico_analizar(
                 raiz,
@@ -1438,7 +1532,7 @@ int main(void)
                     &contexto_codegen;
 
                 if (!codegen_generar_archivo(
-                        raiz, "salida.asm", &config_codegen))
+                        raiz, ruta_asm, &config_codegen))
                 {
                     fprintf(stderr,
                             "Error: fallo la generacion de ensamblador.\n");
@@ -1454,7 +1548,8 @@ int main(void)
                     return EXIT_FAILURE;
                 }
 
-                printf("\nEnsamblador generado: salida.asm\n");
+                if (opcion_verbose)
+                    printf("\nEnsamblador generado: %s\n", ruta_asm);
             }
 
             ast_liberar(raiz);
@@ -1462,10 +1557,18 @@ int main(void)
         }
 
 
-        /* Mostrar los simbolos, sus ambitos y las firmas de funciones. */
-        ts_imprimir(tabla, stdout);
-        ts_imprimir_ambitos(tabla, stdout);
-        parser_imprimir_firmas(stdout);
+        /* Mostrar la informacion de simbolos solo con -m. */
+        if (opcion_simbolos)
+        {
+            printf("\nTabla de simbolos:\n");
+            ts_imprimir(tabla, stdout);
+
+            printf("\nAmbitos:\n");
+            ts_imprimir_ambitos(tabla, stdout);
+
+            printf("\nFirmas de funciones:\n");
+            parser_imprimir_firmas(stdout);
+        }
 
         if (errores_semanticos > 0)
             fprintf(stderr, "\nSe encontraron %d errores semanticos.\n",

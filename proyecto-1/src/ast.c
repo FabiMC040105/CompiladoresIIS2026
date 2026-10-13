@@ -261,6 +261,35 @@ if (ast_generar_dot(nodo)) {
 
 }
 
+/* Imprime el AST en consola con indentacion por niveles. */
+static void ast_imprimir_consola_nodos(NodoAST *nodo, int nivel)
+{
+    int i;
+
+    while (nodo != NULL)
+    {
+        for (i = 0; i < nivel; i++)
+            printf("  ");
+
+        printf("%s", ast_nombre_tipo(nodo->tipo));
+
+        if (nodo->valor != NULL)
+            printf(": %s", nodo->valor);
+
+        printf("\n");
+
+        ast_imprimir_consola_nodos(nodo->hijo, nivel + 1);
+
+        nodo = nodo->siguiente;
+    }
+}
+
+/* Funcion publica para imprimir el AST en consola. */
+void ast_imprimir_consola(NodoAST *nodo, int nivel)
+{
+    ast_imprimir_consola_nodos(nodo, nivel);
+}
+
 /* Libera la memoria utilizada por el arbol */
 void ast_liberar(NodoAST *nodo)
 {
