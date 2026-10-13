@@ -701,7 +701,7 @@ Importaciones
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -722,7 +722,7 @@ Globales
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    |  %empty
       {
           $$ = NULL;
       }
@@ -801,7 +801,7 @@ Parametros
       {
           $$ = ast_crear_parametros(ast_unir($1, $2));
       }
-    |
+    |  %empty
       {
           $$ = ast_crear_parametros(NULL);
       }
@@ -812,7 +812,7 @@ ParametrosResto
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    |  %empty
       {
           $$ = NULL;
       }
@@ -884,7 +884,7 @@ Sentencias
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -981,7 +981,7 @@ Inicializacion
       {
           $$ = $2;
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -993,7 +993,7 @@ Inicializadorlista
           $$ = ast_crear(AST_LISTA, "literal");
           ast_agregar_hijo($$, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1005,7 +1005,7 @@ Inicializadormatriz
           $$ = ast_crear(AST_MATRIZ, "literal");
           ast_agregar_hijo($$, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1024,7 +1024,7 @@ RestoFilas
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1043,7 +1043,7 @@ Elementos
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1054,7 +1054,7 @@ RestoElementos
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1204,7 +1204,7 @@ Argumentos
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1215,7 +1215,7 @@ RestoArgumentos
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
