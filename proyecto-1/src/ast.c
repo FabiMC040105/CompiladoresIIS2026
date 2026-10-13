@@ -149,6 +149,7 @@ int id = (*contador)++;
 /* Escribe el nodo */
 fprintf(archivo, "    nodo%d [label=\"", id);
 
+
 ast_escribir_texto_dot(
     archivo,
     ast_nombre_tipo(nodo->tipo)
@@ -159,7 +160,22 @@ if (nodo->valor != NULL) {
     ast_escribir_texto_dot(archivo, nodo->valor);
 }
 
-fprintf(archivo, "\\n(linea %d)", nodo->linea);
+/* Mostrar claramente que la declaracion tiene inicializacion.
+   La variable es el primer hijo y su valor inicial es el segundo. */
+if (nodo->tipo == AST_DECLARACION &&
+    nodo->hijo != NULL &&
+    nodo->hijo->siguiente != NULL) {
+    fputs(" (inicializacion '=')", archivo);
+}
+
+/* Estos nodos representan estructuras contenedoras.
+   Sus lineas actuales pueden heredarse de sus descendientes. */
+if (nodo->tipo != AST_PROGRAMA &&
+    nodo->tipo != AST_PRINCIPAL &&
+    nodo->tipo != AST_BLOQUE) {
+    fprintf(archivo, "\\n(linea %d)", nodo->linea);
+}
+
 fputs("\"];\n", archivo);
 
 /* Conecta el nodo con su padre */
