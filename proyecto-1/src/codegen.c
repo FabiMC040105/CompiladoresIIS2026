@@ -2556,6 +2556,114 @@ static void generar_programa(Codegen *cg, NodoAST *nodo)
     }
 }
 
+
+/* FEIST_E_INTEGRACION_2026 */
+/* Las llamadas especiales FEIST no pasan por la convención de funciones. */
+static int es_intrinseca_feist(const char *s)
+{
+    return s != NULL &&
+        (!strcmp(s, "feist_auth") || !strcmp(s, "feist_kstore") ||
+         !strcmp(s, "feist_fround") || !strcmp(s, "feist_logout"));
+}
+
+static int inmediato_feist(NodoAST *n, int maximo)
+{
+    char *fin = NULL;
+    long v;
+    if (n == NULL || n->tipo != AST_NUMERO || !n->valor)
+        return -1;
+    v = strtol(n->valor, &fin, 10);
+    if (fin == NULL || *fin != '\0' || v < 0 || v > maximo)
+        return -1;
+    return (int)v;
+}
+
+/* Todo lo que FEIST lee en registros se calendariza con scheduler.c.
+   Se conservan los temporales hasta terminar la instrucción para no
+   reutilizar un registro que aún proporciona una mitad L/R. */
+static void generar_intrinseca_feist(Codegen *cg, NodoAST *n)
+{
+    NodoAST *a[7] = {NULL};
+    NodoAST *actual;
+    int t[4] = {-1, -1, -1, -1};
+    int narg = 0;
+    int llave = -1, ronda = -1, modo = -1;
+    const char *nombre = n->valor;
+    int esperado = !strcmp(nombre, "feist_auth") ? 2 :
+                   !strcmp(nombre, "feist_kstore") ? 3 :
+                   !strcmp(nombre, "feist_fround") ? 7 : 0;
+    int i;
+    int ok = 0;
+    for (actual = n->hijo; actual; actual = actual->siguiente) {
+        if (narg < 7) a[narg] = actual;
+        narg++;
+    }
+    if (narg != esperado) {
+        error_codegen(cg, n, "%s espera %d argumentos", nombre, esperado);
+        return;
+    }
+    if (!strcmp(nombre, "feist_logout")) {
+        (void)emitir_instruccion(cg, "FEIST", "LOGOUT");
+        return;
+    }
+    if (!strcmp(nombre, "feist_kstore")) {
+        llave = inmediato_feist(a[0], 3);
+        ronda = inmediato_feist(a[1], 3);
+        if (llave < 0 || ronda < 0) {
+            error_codegen(cg, n, "KSTORE requiere llave y ronda literales 0..3");
+            return;
+        }
+        t[0] = generar_expresion(cg, a[2]);
+        if (t[0] < 0) goto fin;
+        ok = emitir_instruccion(cg, "FEIST", "KSTORE %d, %d, x%d", llave, ronda, t[0]);
+        goto fin;
+    }
+    if (!strcmp(nombre, "feist_auth")) {
+        t[0] = generar_expresion(cg, a[0]);
+        if (t[0] < 0) goto fin;
+        t[1] = generar_expresion(cg, a[1]);
+        if (t[1] < 0) goto fin;
+        ok = emitir_instruccion(cg, "FEIST", "AUTH x%d, x%d", t[0], t[1]);
+        goto fin;
+    }
+    if (!strcmp(nombre, "feist_fround")) {
+        llave = inmediato_feist(a[4], 3);
+        ronda = inmediato_feist(a[5], 3);
+        modo = inmediato_feist(a[6], 1);
+        if (llave < 0 || ronda < 0 || modo < 0 ||
+            !a[0] || !a[1] || a[0]->tipo != AST_VARIABLE ||
+            a[1]->tipo != AST_VARIABLE ||
+            !a[0]->valor || !a[1]->valor ||
+            !strcmp(a[0]->valor, a[1]->valor)) {
+            error_codegen(cg, n, "operandos o inmediatos FROUND invalidos");
+            return;
+        }
+        /* Reservar destinos separados antes de evaluar las fuentes. */
+        t[0] = reservar_temp(cg, n);
+        if (t[0] < 0) goto fin;
+        t[1] = reservar_temp(cg, n);
+        if (t[1] < 0) goto fin;
+        t[2] = generar_expresion(cg, a[2]);
+        if (t[2] < 0) goto fin;
+        t[3] = generar_expresion(cg, a[3]);
+        if (t[3] < 0) goto fin;
+        if (!emitir_instruccion(cg, "FEIST", "FROUND x%d, x%d, x%d, x%d, %d, %d, %d",
+                               t[0], t[1], t[2], t[3], llave, ronda, modo))
+            goto fin;
+        /* Liberar las fuentes: desde aquí solo necesitamos los resultados. */
+        liberar_temp(cg, t[2]); t[2] = -1;
+        liberar_temp(cg, t[3]); t[3] = -1;
+        if (!guardar_variable(cg, a[0], a[0]->valor, t[0])) goto fin;
+        if (!guardar_variable(cg, a[1], a[1]->valor, t[1])) goto fin;
+        ok = 1;
+        goto fin;
+    }
+    error_codegen(cg, n, "intrinseca FEIST desconocida");
+fin:
+    for (i = 0; i < 4; ++i) liberar_temp(cg, t[i]);
+    (void)ok; /* Las fallas de emitir/guardar ya incrementan cg->errores. */
+}
+
 static void generar_nodo(Codegen *cg, NodoAST *nodo)
 {
     if (nodo == NULL)
@@ -2619,7 +2727,9 @@ static void generar_nodo(Codegen *cg, NodoAST *nodo)
         break;
 
     case AST_LLAMADA:
-        if (generar_llamada(cg, nodo, 0) < 0)
+        if (es_intrinseca_feist(nodo->valor))
+            generar_intrinseca_feist(cg, nodo);
+        else if (generar_llamada(cg, nodo, 0) < 0)
             return;
         break;
 

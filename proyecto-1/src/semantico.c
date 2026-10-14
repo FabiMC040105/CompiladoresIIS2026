@@ -83,6 +83,8 @@ static int es_logico(const char *s)
     return !strcmp(s, "AND") || !strcmp(s, "OR");
 }
 
+static int es_intrinseca_feist(const char *s);
+
 /* La inferencia de tipos no emite errores: los emite la validacion del nodo. */
 static TipoDato inferir_tipo(const NodoAST *n, const EstadoSemantico *e)
 {
@@ -98,6 +100,7 @@ static TipoDato inferir_tipo(const NodoAST *n, const EstadoSemantico *e)
     }
 
     if (n->tipo == AST_LLAMADA) {
+        if (es_intrinseca_feist(n->valor)) return TIPO_VACIO;
         const Simbolo *s = buscar_funcion(e, n->valor);
         return s && s->categoria == SIM_FUNCION ? s->tipo : TIPO_DESCONOCIDO;
     }
@@ -361,9 +364,108 @@ static int validar_literal_coleccion(const NodoAST *n, const EstadoSemantico *e)
     return errores;
 }
 
+
+/* FEIST_E_INTEGRACION_2026 */
+/* Intrinsecas FEIST: llamadas que no necesitan simbolo de funcion.
+   Reservadas para sentencias; los argumentos especiales son inmediatos ISA. */
+static int es_intrinseca_feist(const char *s)
+{
+    return s != NULL &&
+        (!strcmp(s, "feist_auth") || !strcmp(s, "feist_kstore") ||
+         !strcmp(s, "feist_fround") || !strcmp(s, "feist_logout"));
+}
+
+static int literal_feist(const NodoAST *n, long minimo, long maximo)
+{
+    char *fin = NULL;
+    long x;
+    if (n == NULL || n->tipo != AST_NUMERO || n->valor == NULL)
+        return 0;
+    x = strtol(n->valor, &fin, 10);
+    return fin != NULL && *fin == '\0' && x >= minimo && x <= maximo;
+}
+
+static int validar_intrinseca_feist(const NodoAST *n, const EstadoSemantico *e)
+{
+    const NodoAST *args[7] = {NULL};
+    const NodoAST *a;
+    const char *nombre = n->valor;
+    int recibidos = 0;
+    int esperados = !strcmp(nombre, "feist_auth") ? 2 :
+                    !strcmp(nombre, "feist_kstore") ? 3 :
+                    !strcmp(nombre, "feist_fround") ? 7 : 0;
+    int errores = 0;
+    int i;
+
+    for (a = n->hijo; a; a = a->siguiente) {
+        if (recibidos < 7) args[recibidos] = a;
+        recibidos++;
+    }
+    if (recibidos != esperados) {
+        fprintf(stderr, "Error semantico en linea %d: '%s' espera %d argumentos, recibio %d.\n",
+                n->linea, nombre, esperados, recibidos);
+        return 1;
+    }
+    if (!strcmp(nombre, "feist_kstore")) {
+        if (!literal_feist(args[0], 0, 3) || !literal_feist(args[1], 0, 3)) {
+            fprintf(stderr, "Error semantico en linea %d: llave/ronda de KSTORE deben ser literales 0..3.\n", n->linea);
+            errores++;
+        }
+    } else if (!strcmp(nombre, "feist_fround")) {
+        if (!literal_feist(args[4], 0, 3) ||
+            !literal_feist(args[5], 0, 3) ||
+            !literal_feist(args[6], 0, 1)) {
+            fprintf(stderr, "Error semantico en linea %d: FROUND requiere llave 0..3, ronda 0..3 y modo 0..1 literales.\n", n->linea);
+            errores++;
+        }
+        for (i = 0; i < 2; ++i) {
+            const Simbolo *s;
+            if (!args[i] || args[i]->tipo != AST_VARIABLE ||
+                !(s = buscar_en_orden(args[i], e, NULL)) ||
+                (s->categoria != SIM_VARIABLE && s->categoria != SIM_PARAMETRO) ||
+                s->forma != FORMA_ESCALAR || s->tipo != TIPO_ENTERO) {
+                fprintf(stderr, "Error semantico en linea %d: destino %d de FROUND debe ser variable entera escalar declarada.\n",
+                        n->linea, i + 1);
+                errores++;
+            }
+        }
+        if (args[0] && args[1] && args[0]->valor && args[1]->valor &&
+            !strcmp(args[0]->valor, args[1]->valor)) {
+            fprintf(stderr, "Error semantico en linea %d: FROUND requiere destinos L y R distintos.\n", n->linea);
+            errores++;
+        }
+    }
+
+    /* Solo las fuentes de datos, no los inmediatos ni destinos de FROUND. */
+    if (!strcmp(nombre, "feist_auth")) {
+        for (i = 0; i < 2; ++i)
+            if (inferir_tipo(args[i], e) != TIPO_DESCONOCIDO &&
+                inferir_tipo(args[i], e) != TIPO_ENTERO) {
+                fprintf(stderr, "Error semantico en linea %d: AUTH requiere enteros.\n", n->linea);
+                errores++;
+            }
+    } else if (!strcmp(nombre, "feist_kstore")) {
+        if (inferir_tipo(args[2], e) != TIPO_DESCONOCIDO &&
+            inferir_tipo(args[2], e) != TIPO_ENTERO) {
+            fprintf(stderr, "Error semantico en linea %d: KSTORE requiere subllave entera.\n", n->linea);
+            errores++;
+        }
+    } else if (!strcmp(nombre, "feist_fround")) {
+        for (i = 2; i < 4; ++i)
+            if (inferir_tipo(args[i], e) != TIPO_DESCONOCIDO &&
+                inferir_tipo(args[i], e) != TIPO_ENTERO) {
+                fprintf(stderr, "Error semantico en linea %d: FROUND requiere mitades enteras.\n", n->linea);
+                errores++;
+            }
+    }
+    return errores;
+}
+
 static int validar_llamada(const NodoAST *n, const EstadoSemantico *e)
 {
     if (!n->valor) return 1;
+    if (es_intrinseca_feist(n->valor))
+        return validar_intrinseca_feist(n, e);
     const Simbolo *fn = buscar_funcion(e, n->valor);
     if (!fn) {
         fprintf(stderr, "Error semantico en linea %d: funcion '%s' no declarada.\n",

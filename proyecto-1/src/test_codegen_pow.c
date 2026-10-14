@@ -29,10 +29,22 @@ static int resolver_prueba(void *contexto,
     size_t i;
     (void)contexto;
 
+    if (strcmp(nombre, "principal") == 0) {
+        memset(salida, 0, sizeof(*salida));
+        salida->nombre = "principal";
+        salida->tipo = "vacio";
+        salida->categoria = CODEGEN_CAT_FUNCION;
+        salida->ubicacion = CODEGEN_UBICACION_FUNCION;
+        salida->tamano_marco = 20;
+        return 1;
+    }
+    salida->categoria = CODEGEN_CAT_VARIABLE;
+    salida->ubicacion = CODEGEN_UBICACION_LOCAL;
+
     for (i = 0; i < sizeof(simbolos) / sizeof(simbolos[0]); i++) {
         if (strcmp(simbolos[i].nombre, nombre) == 0) {
             salida->nombre = simbolos[i].nombre;
-            salida->direccion = simbolos[i].direccion;
+            salida->direccion = -(long)simbolos[i].direccion - 4;
             salida->tipo = simbolos[i].tipo;
             return 1;
         }
@@ -142,7 +154,7 @@ static char *leer_archivo(const char *ruta)
 int main(void)
 {
     NodoAST *raiz;
-    CodegenConfig config;
+    CodegenConfig config = {0};
     char *contenido;
     int ok;
     const char *salida = "salida_codegen_pow.asm";
