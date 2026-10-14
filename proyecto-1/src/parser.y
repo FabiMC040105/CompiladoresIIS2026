@@ -1,8 +1,21 @@
 %code requires {
+
+/* 
+Incluye las definiciones del AST en el encabezado generado por 
+Bison (parser.tab.h), lo cual permite compartir el tipo NodoAST
+entre el lexer y el parser.
+*/
 #include "ast.h"
+
 }
 
 %{
+    /* 
+    Incluye las biblotecas y los modulos necesarios para la implementacion del parser
+    y la integracion con las otras fases del compilador (tabla de simbolos, semantica, 
+    codegen, resolucion de etiquetas y generacion de codigo maquina), se ponen aqui 
+    porque estas van en el codigo en C que genera bison y no en el encabezado de parser.tab.h.
+     */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,16 +27,28 @@
 #include "resolucion_etiquetas.h"
 #include "binario.h"
 
+    /* 
+    Declaraciones para la comunicacion entre lexer y parser.
+    yylex()-> obtiene tokens
+    yylineno-> contiene numero de lineas del source
+    yyerror()-> reporta erroes sintacticos
+    yyin-> flujo de entrada para el archivo del source
+    */ 
 int yylex(void);
 extern int yylineno;
 void yyerror(const char *s);
 extern FILE *yyin;
-
+    
+    /*
+    Declara las estructuras globales que se utilizan en error_compilacion.
+    raiz alamcena la direccion al nodo prinicpal del AST y tabla mantiene.
+    direccion a la tabla de simbolos que se va generando durante el analisis.
+    */
 NodoAST *raiz = NULL;
 TablaSimbolos *tabla = NULL;
 
 
-/* Opciones recibidas desde la terminal. */
+    /* Opciones de compilacion (-v,-t,-m,-s,-p,-x) recibidas desde la terminal. */
 int opcion_verbose = 0;
 int opcion_ast = 0;
 int opcion_simbolos = 0;
@@ -31,13 +56,16 @@ int opcion_asm = 0;
 int opcion_paquetes = 0;
 int opcion_ensamblar = 0;
 
+    /* ruta_asm y ruta_bin almacenan las rutas de los archivos de ensamblador y codigo maquina. */
 char ruta_asm[1024];
 char ruta_bin[1024];
 
-/* Contextos de firmas: se preparan desde Flex al reconocer la cabecera.
- * Se registran como simbolos en las acciones existentes de Bison.
- * Nunca se modifica una produccion ni se recorre el AST.
- */
+    /*---------------------------FUNCIONES CABECERAS Y AMBITOS ---------------------------------------------------------------------------------------------*/
+
+    /* 
+    Almacenamiento temporal de contexto de funciones reconocidas durante lexer y parser.
+    Todos se conserva en lista enlazada.
+    */
 typedef struct ContextoFuncion {
     const NodoAST *nodo_nombre; /* NULL para principal */
     Ambito *ambito;            /* ambito de parametros de la funcion */
@@ -47,22 +75,21 @@ typedef struct ContextoFuncion {
     struct ContextoFuncion *siguiente;
 } ContextoFuncion;
 
-static ContextoFuncion *contextos_funciones = NULL;
-static int esperando_tipo_funcion = 0;
-static int esperando_nombre_funcion = 0;
-static TipoDato retorno_lexico = TIPO_DESCONOCIDO;
+    /* Variables de reconocimiento de cabecera de las funciones del source. */
+static ContextoFuncion *contextos_funciones = NULL; /*mantiene lista de funcs*/
+static int esperando_tipo_funcion = 0; /*indicacion que se espera el tipo(entero, vof, vacio)*/
+static int esperando_nombre_funcion = 0; /*indicacion que se espera nombre de func, y crea ambito con params*/
+static TipoDato retorno_lexico = TIPO_DESCONOCIDO;/*almacena tipo de retorno temporalmente*/
 
-/* Avisos del lexer para reconocer solamente la cabecera defina TIPO nombre.
- * El registro de los simbolos se realiza desde acciones de Bison.
- */
-void parser_avisar_defina(void)
+    /* Funciones invocadas por lexer para cabecera de funcion. Usadas en Defina y lexer.l y en tipos lexer.l */
+void parser_avisar_defina(void) /* inicia reconocimiento*/
 {
     esperando_tipo_funcion = 1;
     esperando_nombre_funcion = 0;
     retorno_lexico = TIPO_DESCONOCIDO;
 }
 
-void parser_avisar_tipo(TipoDato tipo)
+void parser_avisar_tipo(TipoDato tipo) /*almacena tipo de retorno y prepara reconocimiento de nombre.*/
 {
     if (!esperando_tipo_funcion)
         return;
@@ -72,9 +99,11 @@ void parser_avisar_tipo(TipoDato tipo)
     esperando_nombre_funcion = 1;
 }
 
-/* Se invoca cuando Flex encuentra el nombre de la funcion (o PRINCIPAL).
- * Crea el ambito de parametros antes de analizar la lista de parametros.
- */
+    /* 
+    Perpara contexto de funcion cuando se reconoce el nombre(lexer), verificacion de de que se declare en ambito global,
+    reserva memoria para almacenar informacion y crea el ambito donde se reconocen sus params. Agrega el nuevo contexto 
+    a la lista de funciones y termina reconocimiento de cabecera.
+    */
 static void parser_preparar_funcion(const NodoAST *nombre,
                                    const char *texto, int linea,
                                    int principal)
@@ -115,13 +144,13 @@ static void parser_preparar_funcion(const NodoAST *nombre,
     esperando_nombre_funcion = 0;
 }
 
-void parser_marcar_principal(int linea)
+void parser_marcar_principal(int linea) /*Perpara contexto de funcion principal identificandola como punto de entrada al programa*/
 {
     parser_preparar_funcion(NULL, "principal", linea, 1);
 }
 
 static ContextoFuncion *parser_contexto_funcion(const NodoAST *nombre,
-                                                int principal)
+                                                int principal)        /* busca y retorna contexto de funcion previamente reconocida, Null si no encuentra contexto que coincida */
 {
     ContextoFuncion *ctx;
     for (ctx = contextos_funciones; ctx != NULL; ctx = ctx->siguiente)
@@ -132,7 +161,7 @@ static ContextoFuncion *parser_contexto_funcion(const NodoAST *nombre,
     return NULL;
 }
 
-static void parser_liberar_contextos_funciones(void)
+static void parser_liberar_contextos_funciones(void) /*recorre lista de contextos de funcs y libera memoria reservada de elementos(no ambitos)*/
 {
     while (contextos_funciones != NULL)
     {
@@ -141,33 +170,36 @@ static void parser_liberar_contextos_funciones(void)
         contextos_funciones = siguiente;
     }
 }
+    /*-------------------------------ADMIN DE AMBITOS Y RELACIONES DE AST----------------------------------------------------------------------------------*/
 
-/* Contexto lexico para los ambitos, sin alterar las producciones GLC.
- * Cada IDENTIFICADOR conserva una referencia al ambito en el que
- * fue reconocido. Esto evita errores si Bison lee tokens adelantados.
- */
+    /*
+    Estructura para asociacion de identificadores en AST con el ambito en que se reconocio.
+    nodo -> referencia a id dentro AST 
+    ambito-> ambito donde se reconocio id
+    siguiente-> almacenamiento de marcas en la lista enlazada
+    */
 typedef struct MarcaIdentificador {
     const NodoAST *nodo;
     Ambito *ambito;
     struct MarcaIdentificador *siguiente;
 } MarcaIdentificador;
 
-static MarcaIdentificador *marcas_identificadores = NULL;
-static int errores_semanticos = 0;
+static MarcaIdentificador *marcas_identificadores = NULL; /* alamcena lista de id */
+static int errores_semanticos = 0; /*lleva  conteo de errores detectados*/
 
 /* El lexer indica que clase de bloque se abrira con la proxima llave.
    Solo afecta la etiqueta de visualizacion; NO altera la GLC ni el AST. */
 static const char *bloque_pendiente = NULL;
 static int linea_bloque_pendiente = 0;
 
-void parser_indicar_bloque(const char *tipo, int linea)
+void parser_indicar_bloque(const char *tipo, int linea)/*  Almacena temporalmente el tipo y la linea del siguiente bloque que sera abierto. Info desde lexer*/
 {
     bloque_pendiente = tipo;
     linea_bloque_pendiente = linea;
 }
 
-/* Invocadas desde lexer.l exclusivamente para registrar el contexto. */
-void parser_abrir_ambito_lexico(int linea)
+
+void parser_abrir_ambito_lexico(int linea)/*Abre ambito cuando reconoce llave de apertura. Invocadas desde lexer.l exclusivamente para registrar el contexto. */
 {
     char nombre[64];
     Ambito *padre;
@@ -199,8 +231,8 @@ void parser_abrir_ambito_lexico(int linea)
     }
 }
 
-/* La cabecera para necesita su propio ambito (independiente del cuerpo). */
-void parser_abrir_ambito_para_lexico(int linea)
+
+void parser_abrir_ambito_para_lexico(int linea)/*Crae ambito especifico para ciclos "para" mantiene variables declaradas durante inicializacion y dentro de cuerpo. */
 {
     char nombre[64];
     snprintf(nombre, sizeof(nombre), "Para L%d", linea);
@@ -213,7 +245,7 @@ void parser_abrir_ambito_para_lexico(int linea)
     }
 }
 
-void parser_cerrar_ambito_lexico(void)
+void parser_cerrar_ambito_lexico(void) /* Cierra ambito actual cuando lexer reconconoce llave de cierre */
 {
     /* Una llave de cierre extra sera rechazada por Bison.
        Nunca se intenta salir del ambito global. */
@@ -229,7 +261,7 @@ void parser_cerrar_ambito_lexico(void)
     }
 }
 
-void parser_marcar_identificador(NodoAST *nodo)
+void parser_marcar_identificador(NodoAST *nodo) /* Registra ambito donde fue reconocido un id, crea marca que relaciona nodo AST con ambito activo y almacena en lista enlazada */
 {
     MarcaIdentificador *marca;
 
@@ -255,7 +287,7 @@ void parser_marcar_identificador(NodoAST *nodo)
         parser_preparar_funcion(nodo, nodo->valor, nodo->linea, 0);
 }
 
-Ambito *parser_ambito_identificador(const NodoAST *nodo)
+Ambito *parser_ambito_identificador(const NodoAST *nodo) /*Busca ambito asociado a id del AST, recorre marcas registradas y retorna el ambito*/
 {
     MarcaIdentificador *marca;
     for (marca = marcas_identificadores; marca != NULL; marca = marca->siguiente)
@@ -265,8 +297,7 @@ Ambito *parser_ambito_identificador(const NodoAST *nodo)
 }
 
 
-/* Permite al analisis semantico consultar el
-   ambito registrado por el parser. */
+/* Permite al analisis semantico consultar el ambito registrado por el parser. */
 static const Ambito *resolver_ambito_semantico(
     const NodoAST *nodo,
     void *contexto
@@ -279,7 +310,7 @@ static const Ambito *resolver_ambito_semantico(
 
 
 
-static void parser_liberar_marcas(void)
+static void parser_liberar_marcas(void) /*libera la memoria utlizada por lista de marcas de id*/
 {
     while (marcas_identificadores != NULL)
     {
@@ -289,11 +320,17 @@ static void parser_liberar_marcas(void)
     }
 }
 
-/* Insercion al reducir Declaracion, con el ambito capturado por Flex.
- * No modifica el AST ni necesita recorrerlo.
- * Las dimensiones se guardan como texto, ya que la GLC acepta
- * tanto NUMERO como IDENTIFICADOR en Dimension.
- */
+  /*------------------------------------------------REGISTRO VARIABLES Y PARAMENTROS EN TABLA DE SIMBOLOS--------------------------------------------------------------------------------------------*/
+
+    /* 
+    Registra variables declaradas en TS durante reduccion de Declaracion, 
+    obtiene ambito original del id y establece tempralemnte como activo para la insecion,
+    permite registrar diferente formas de variables y almacena las dimensiones, detecta
+    declaraciones duplicadas en ambitos y errores semanticos, restaura ambito original
+
+    permite acumular errores semanticos sin detener el analisis inmediatamente
+
+    */
 static int parser_registrar_variable(const NodoAST *identificador,
                                     TipoDato tipo,
                                     FormaSimbolo forma,
@@ -347,7 +384,7 @@ static int parser_registrar_variable(const NodoAST *identificador,
 
     tabla->ambito_actual = ambito_guardado;
 
-    if (resultado == TS_ERROR_DUPLICADO)
+    if (resultado == TS_ERROR_DUPLICADO) /*nota: permite continuar aunque se registre error semantico si devuelve 1*/
     {
         fprintf(stderr,
                 "Error semantico en linea %d: variable '%s' "
@@ -368,9 +405,12 @@ static int parser_registrar_variable(const NodoAST *identificador,
     return 1;
 }
 
-/* Registra un parametro en el ambito de la funcion.
- * La firma se enlaza al simbolo de la funcion cuando Bison la reduce.
- */
+    /* 
+    Registra parametros de funcion en TS, verifica identificadores pertenezcan al ambito de func
+    y que la simensionse sean validas para lista y matriz. Parametros se incetan en SIM_PARAMETRO
+
+    deteccion de parametros duplicados y registra errores semanticos
+    */
 static int parser_registrar_parametro(const NodoAST *identificador,
                                      TipoDato tipo, FormaSimbolo forma,
                                      const NodoAST *dim1, const NodoAST *dim2)
@@ -418,9 +458,18 @@ static int parser_registrar_parametro(const NodoAST *identificador,
     return 1;
 }
 
-/* Registra la funcion en Global y vincula los parametros ya insertados.
- * Solo recorre la tabla de simbolos, NUNCA el AST.
- */
+    /* 
+    Registra una funcion en el ambito global de la tabla de simbolos durante su reduccion en Bison. 
+    Recupera el contexto previamente preparado por el lexer y utiliza su informacion para registrar el nombre,
+    tipo de retorno y linea de declaracion.
+
+    Asocia el ambito de la funcion con su simbolo y recorre los parametros registrados previamente para construir
+    su firma, conservando el orden de declaracion.
+
+    Detecta funciones duplicadas en el ambito global y registra los errores semanticos correspondientes.
+
+    Tambien permite registrar la funcion principal
+    */
 static int parser_registrar_funcion(const NodoAST *nombre, int principal)
 {
     ContextoFuncion *ctx = parser_contexto_funcion(nombre, principal);
@@ -477,6 +526,17 @@ static int parser_registrar_funcion(const NodoAST *nombre, int principal)
     return 1;
 }
 
+    /*
+    Imprime las firmas de las funciones registradas en la tabla de simbolos.
+    
+    Recorre los simbolos de categoria SIM_FUNCION y muestra el tipo de retorno, nombre, parametros,
+    formas y dimensiones correspondientes.
+    
+    Tambien muestra el identificador del ambito de cada funcion y su cantidad total de parametros.
+    
+    Se utiliza para visualizar la informacion de las funciones durante la depuracion del compilador.
+    */
+
 static void parser_imprimir_firmas(FILE *salida)
 {
     const Simbolo *simbolo;
@@ -519,6 +579,7 @@ static void parser_imprimir_firmas(FILE *salida)
                 simbolo->cantidad_parametros);
     }
 }
+
 
 /* Une dos listas de nodos hermanos. */
 static NodoAST *ast_unir(NodoAST *primero, NodoAST *segundo)
