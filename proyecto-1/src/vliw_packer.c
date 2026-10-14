@@ -1,3 +1,10 @@
+/*
+        Empaquetador de instrucciones VLIW del compilador.
+    Recibe el ensamblador con etiquetas ya resueltas, analiza las operaciones
+    de cada bundle y agrupa instrucciones de diferentes unidades funcionales
+    cuando las restricciones de dependencias y saltos lo permiten.
+    Se mantiene la cantidad original de bundles para conservar sus direcciones.
+*/
 #include "vliw_packer.h"
 #include "scheduler.h"
 
@@ -9,10 +16,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+        Limites de almacenamiento para las lineas de ensamblador, instrucciones
+    individuales y nombres de etiquetas que procesa el empaquetador.
+*/
 #define VLIW_LINEA_MAX 2048u
 #define VLIW_SLOT_MAX  512u
 #define VLIW_LABEL_MAX 256u
 
+/*
+        Identifica los cuatro slots disponibles en la arquitectura VLIW.
+    Cada indice se utiliza para acceder a la operacion de una unidad funcional
+    dentro de un bundle.
+*/
 typedef enum {
     SLOT_ALU = 0,
     SLOT_LSU = 1,
@@ -22,6 +38,11 @@ typedef enum {
 } SlotVLIW;
 
 typedef struct {
+/*
+        Informacion de una instruccion perteneciente a un slot.
+    presente indica que el slot fue escrito en el ASM, nop identifica una
+    instruccion vacia e info guarda los registros leidos y modificados.
+*/
     int presente;
     int nop;
     char texto[VLIW_SLOT_MAX];       /* instruccion sin "SLOT:" */
@@ -29,15 +50,26 @@ typedef struct {
 } OperacionVLIW;
 
 typedef struct {
+/*
+        Un bundle contiene un espacio para cada una de las cuatro unidades
+    funcionales, aunque no todas necesitan tener una operacion activa.
+*/
     OperacionVLIW op[SLOT_CANTIDAD];
 } BundleVLIW;
 
 typedef struct {
+/*
+        Relaciona el nombre de una etiqueta con el indice del bundle al que apunta.
+*/
     char nombre[VLIW_LABEL_MAX];
     size_t bundle;
 } EtiquetaVLIW;
 
 typedef struct {
+/*
+        Almacena dinamicamente los bundles del programa y las etiquetas
+    encontradas durante la lectura del ensamblador.
+*/
     BundleVLIW *bundles;
     size_t cantidad;
     size_t capacidad;
@@ -47,6 +79,10 @@ typedef struct {
 } ProgramaVLIW;
 
 typedef struct {
+/*
+        Contadores de las combinaciones producidas por el empaquetamiento.
+    Se utilizan para mostrar cuantos bundles se aprovecharon en cada fase.
+*/
     size_t alu_lsu;
     size_t alu_bru;
     size_t lsu_bru;
@@ -54,6 +90,10 @@ typedef struct {
     size_t cuatro_slots;
 } EstadisticasVLIW;
 
+/*
+    Elimina los espacios al inicio y al final de una cadena.
+        Devuelve un puntero al primer caracter valido de la misma cadena.
+*/
 static char *trim(char *s)
 {
     char *fin;
@@ -63,6 +103,10 @@ static char *trim(char *s)
     return s;
 }
 
+/*
+    Elimina el contenido que aparece despues de # o //.
+        Permite analizar las instrucciones sin interpretar los comentarios del ASM.
+*/
 static void quitar_comentario(char *s)
 {
     char *a = strchr(s, '#');
@@ -73,6 +117,10 @@ static void quitar_comentario(char *s)
     if (c != NULL) *c = '\0';
 }
 
+/*
+    Comprueba si una linea corresponde a una etiqueta valida.
+        Requiere un nombre formado por letras, numeros o guion bajo, terminado en dos puntos.
+*/
 static int es_nombre_etiqueta(const char *s)
 {
     size_t i, n = strlen(s);
@@ -83,6 +131,10 @@ static int es_nombre_etiqueta(const char *s)
     return 1;
 }
 
+/*
+    Devuelve el nombre textual de la unidad funcional indicada.
+        Se utiliza cuando se escribe el ensamblador empaquetado.
+*/
 static const char *nombre_slot(SlotVLIW s)
 {
     switch (s) {
@@ -94,6 +146,10 @@ static const char *nombre_slot(SlotVLIW s)
     }
 }
 
+/*
+    Convierte el nombre de un slot del ASM a su valor interno.
+        Reconoce ALU, LSU, BRU y FEIST, y rechaza nombres desconocidos.
+*/
 static int parsear_slot(const char *s, SlotVLIW *slot)
 {
     if (strcmp(s, "ALU") == 0) *slot = SLOT_ALU;
@@ -104,6 +160,10 @@ static int parsear_slot(const char *s, SlotVLIW *slot)
     return 1;
 }
 
+/*
+    Convierte una cadena a mayusculas para reconocer los nombres
+        de las unidades funcionales independientemente de como esten escritos.
+*/
 static void mayusculas(char *s)
 {
     while (*s) {
@@ -112,10 +172,18 @@ static void mayusculas(char *s)
     }
 }
 
+/*
+    Agrega un bundle al arreglo del programa.
+        Si no existe capacidad suficiente, aumenta el espacio reservado mediante realloc.
+*/
 static int agregar_bundle(ProgramaVLIW *p, const BundleVLIW *b)
 {
     BundleVLIW *nuevo;
     size_t cap;
+/*
+        El arreglo inicia con una capacidad pequena y se duplica cuando se llena.
+    Se comprueba que el nuevo tamano no desborde la memoria reservada.
+*/
     if (p->cantidad == p->capacidad) {
         cap = p->capacidad == 0 ? 64u : p->capacidad * 2u;
         if (cap < p->capacidad || cap > SIZE_MAX / sizeof(*nuevo)) return 0;
@@ -128,6 +196,10 @@ static int agregar_bundle(ProgramaVLIW *p, const BundleVLIW *b)
     return 1;
 }
 
+/*
+    Almacena una etiqueta junto con la posicion del siguiente bundle.
+        Amplia el arreglo de etiquetas cuando se alcanza su capacidad actual.
+*/
 static int agregar_etiqueta(ProgramaVLIW *p, const char *nombre, size_t bundle)
 {
     EtiquetaVLIW *nuevo;
@@ -147,6 +219,10 @@ static int agregar_etiqueta(ProgramaVLIW *p, const char *nombre, size_t bundle)
     return 1;
 }
 
+/*
+    Libera los arreglos de bundles y etiquetas utilizados durante
+        el empaquetamiento, y reinicia la estructura del programa.
+*/
 static void liberar_programa(ProgramaVLIW *p)
 {
     free(p->bundles);
@@ -154,6 +230,11 @@ static void liberar_programa(ProgramaVLIW *p)
     memset(p, 0, sizeof(*p));
 }
 
+/*
+    Analiza una instruccion con formato SLOT: OPERACION.
+        Identifica la unidad funcional, impide repetir un slot dentro del bundle
+        y consulta al scheduler para obtener las dependencias de registros.
+*/
 static int parsear_operacion(char *pieza, BundleVLIW *bundle,
                              size_t numero_linea, FILE *err)
 {
@@ -192,6 +273,10 @@ static int parsear_operacion(char *pieza, BundleVLIW *bundle,
                 numero_linea);
         return 0;
     }
+/*
+        El scheduler identifica que registros lee y escribe la instruccion.
+    Sin esta informacion no se puede comprobar la seguridad de la fusion.
+*/
     if (!scheduler_analizar(slot_txt, instr, &op->info)) {
         fprintf(err, "Empaquetador VLIW, linea %zu: instruccion no reconocida: %s: %s\n",
                 numero_linea, slot_txt, instr);
@@ -203,6 +288,11 @@ static int parsear_operacion(char *pieza, BundleVLIW *bundle,
     return 1;
 }
 
+/*
+    Lee el ensamblador de entrada y construye los bundles en memoria.
+        Ignora comentarios, registra etiquetas y permite varias instrucciones
+        por linea cuando estan separadas por el caracter |.
+*/
 static int leer_programa(const char *ruta, ProgramaVLIW *p, FILE *err)
 {
     FILE *f = fopen(ruta, "r");
@@ -224,6 +314,10 @@ static int leer_programa(const char *ruta, ProgramaVLIW *p, FILE *err)
         quitar_comentario(linea);
         s = trim(linea);
         if (*s == '\0') continue;
+/*
+        Las etiquetas apuntan a la cantidad de bundles procesados hasta ahora.
+    No ocupan un bundle ni incrementan el contador de instrucciones.
+*/
         if (es_nombre_etiqueta(s)) {
             size_t n = strlen(s);
             s[n - 1] = '\0';
@@ -235,6 +329,10 @@ static int leer_programa(const char *ruta, ProgramaVLIW *p, FILE *err)
         }
         memset(&b, 0, sizeof(b));
         cursor = s;
+/*
+        Separa cada segmento delimitado por | y lo coloca en el slot
+    correspondiente del mismo bundle.
+*/
         while (cursor != NULL) {
             char *sep = strchr(cursor, '|');
             char *pieza;
@@ -259,11 +357,19 @@ static int leer_programa(const char *ruta, ProgramaVLIW *p, FILE *err)
     return 1;
 }
 
+/*
+    Indica si el slot contiene una instruccion activa.
+        Los slots ausentes y las instrucciones NOP no se cuentan como operaciones.
+*/
 static int actual(const OperacionVLIW *op)
 {
     return op->presente && !op->nop;
 }
 
+/*
+    Cuenta cuantas unidades funcionales tienen instrucciones activas
+        dentro de un mismo bundle.
+*/
 static int cantidad_actuales(const BundleVLIW *b)
 {
     int n = 0, s;
@@ -271,6 +377,10 @@ static int cantidad_actuales(const BundleVLIW *b)
     return n;
 }
 
+/*
+    Reune los registros que leen todas las operaciones activas del bundle.
+        Cada posicion del arreglo representa uno de los registros de la ISA.
+*/
 static void lecturas_bundle(const BundleVLIW *b, unsigned char out[16])
 {
     int s, r;
@@ -279,6 +389,10 @@ static void lecturas_bundle(const BundleVLIW *b, unsigned char out[16])
         for (r = 2; r < 16; r++) if (b->op[s].info.lee[r]) out[r] = 1;
 }
 
+/*
+    Reune los registros escritos por las instrucciones activas del bundle.
+        Esta informacion se utiliza para detectar dependencias antes de fusionar.
+*/
 static void escrituras_bundle(const BundleVLIW *b, unsigned char out[16])
 {
     int s, r;
@@ -287,6 +401,10 @@ static void escrituras_bundle(const BundleVLIW *b, unsigned char out[16])
         for (r = 2; r < 16; r++) if (b->op[s].info.escribe[r]) out[r] = 1;
 }
 
+/*
+    Verifica si dos conjuntos de registros tienen algun elemento en comun.
+        Se utiliza para detectar posibles dependencias RAW, WAR o WAW.
+*/
 static int interseccion(const unsigned char a[16], const unsigned char b[16])
 {
     int r;
@@ -294,6 +412,11 @@ static int interseccion(const unsigned char a[16], const unsigned char b[16])
     return 0;
 }
 
+/*
+    Detecta si una operacion distinta de BRU modifica el registro x1.
+        Estas redirecciones del PC necesitan tratamiento especial para no
+        mover operaciones que podrian ejecutarse fuera de su camino correcto.
+*/
 static int redireccion_pc_no_bru(const BundleVLIW *b)
 {
     int s;
@@ -303,6 +426,10 @@ static int redireccion_pc_no_bru(const BundleVLIW *b)
     return 0;
 }
 
+/*
+    Convierte un texto a numero y comprueba que no queden caracteres invalidos.
+        Se utiliza al leer los offsets numericos de los saltos.
+*/
 static int parse_long_completo(const char *s, long *v)
 {
     char *fin;
@@ -312,6 +439,11 @@ static int parse_long_completo(const char *s, long *v)
     return errno != ERANGE && *s != '\0' && *fin == '\0';
 }
 
+/*
+    Extrae la informacion de una instruccion de salto BRU.
+        Obtiene su offset, los registros usados en la condicion y el bundle destino,
+        verificando que el destino este dentro del programa y alineado a 16 bytes.
+*/
 static int info_branch(const OperacionVLIW *op, size_t pos, size_t total,
                        long *offset, size_t *destino,
                        unsigned char lee[16], char *nombre, size_t n_nombre)
@@ -335,6 +467,10 @@ static int info_branch(const OperacionVLIW *op, size_t pos, size_t total,
         if (r2 >= 2 && r2 < 16) lee[r2] = 1;
     } else return 0;
     {
+/*
+        El PC de cada bundle avanza 16 bytes. La direccion destino se obtiene
+    sumando el desplazamiento del salto a la direccion de su bundle origen.
+*/
         int64_t d = (int64_t)pos * 16 + (int64_t)off;
         if (d < 0 || d % 16 != 0 || d / 16 >= (int64_t)total) return 0;
         *destino = (size_t)(d / 16);
@@ -344,6 +480,11 @@ static int info_branch(const OperacionVLIW *op, size_t pos, size_t total,
     return 1;
 }
 
+/*
+    Comprueba si una operacion es ADDI con origen x0 y destino temporal x4-x12.
+        Esta forma se utiliza como candidato para las fusiones conservadoras
+        con instrucciones LSU y BRU.
+*/
 static int es_addi_constante_temporal(const OperacionVLIW *op,
                                       int *rd)
 {
@@ -359,6 +500,10 @@ static int es_addi_constante_temporal(const OperacionVLIW *op,
     return 1;
 }
 
+/*
+    Reconoce una instruccion LOAD y obtiene el registro destino y
+        el registro base empleado para calcular su direccion de memoria.
+*/
 static int info_load(const OperacionVLIW *op, int *rd, int *base)
 {
     long off;
@@ -366,6 +511,10 @@ static int info_load(const OperacionVLIW *op, int *rd, int *base)
     return sscanf(op->texto, "LOAD x%d, %ld(x%d)", rd, &off, base) == 3;
 }
 
+/*
+    Verifica si una operacion activa corresponde a un STORE valido.
+        Se utiliza para identificar candidatos al empaquetamiento con BRU.
+*/
 static int es_store(const OperacionVLIW *op)
 {
     int r, b;
@@ -374,6 +523,10 @@ static int es_store(const OperacionVLIW *op)
            sscanf(op->texto, "STORE x%d, %ld(x%d)", &r, &off, &b) == 3;
 }
 
+/*
+    Comprueba si una instruccion FEIST utiliza x1 como registro fuente.
+        Esto evita mover operaciones que dependen del valor especial del PC.
+*/
 static int feist_usa_x1(const OperacionVLIW *op)
 {
     char mn[16];
@@ -389,6 +542,10 @@ static int feist_usa_x1(const OperacionVLIW *op)
     return 0;
 }
 
+/*
+    Identifica las instrucciones FEIST que modifican el estado de la boveda.
+        Este dato permite aplicar restricciones adicionales al reordenamiento.
+*/
 static int feist_cambia_boveda(const OperacionVLIW *op)
 {
     return actual(op) &&
@@ -397,6 +554,11 @@ static int feist_cambia_boveda(const OperacionVLIW *op)
             strncmp(op->texto, "LOGOUT", 6) == 0);
 }
 
+/*
+    Marca los bundles que pueden ser destinos de saltos o etiquetas.
+        Estos puntos se protegen para no mover instrucciones de una forma
+        que altere lo que ejecuta el procesador al llegar a una direccion.
+*/
 static void marcar_destinos(const ProgramaVLIW *p, unsigned char *targets)
 {
     size_t i, e;
@@ -404,6 +566,10 @@ static void marcar_destinos(const ProgramaVLIW *p, unsigned char *targets)
     for (e = 0; e < p->cantidad_etiquetas; e++)
         if (p->etiquetas[e].bundle < p->cantidad)
             targets[p->etiquetas[e].bundle] = 1;
+/*
+        Ademas de las etiquetas escritas en el ASM, se protegen los destinos
+    calculados a partir de los saltos BRU con offsets numericos.
+*/
     for (i = 0; i < p->cantidad; i++) {
         long off;
         size_t dest;
@@ -415,12 +581,20 @@ static void marcar_destinos(const ProgramaVLIW *p, unsigned char *targets)
     }
 }
 
+/*
+    Traslada una operacion completa entre slots y deja vacio el origen.
+        Se conservan tanto su texto como las dependencias calculadas.
+*/
 static void mover_op(OperacionVLIW *destino, OperacionVLIW *origen)
 {
     *destino = *origen;
     memset(origen, 0, sizeof(*origen));
 }
 
+/*
+    Reemplaza las operaciones de un bundle por un NOP de ALU.
+        El bundle continua existiendo y conserva su posicion en el programa.
+*/
 static void poner_nop(BundleVLIW *b)
 {
     SchedulerInfo info;
@@ -433,6 +607,10 @@ static void poner_nop(BundleVLIW *b)
     b->op[SLOT_ALU].info = info;
 }
 
+/*
+    Quita los NOP explicitos si el bundle ya contiene instrucciones activas.
+        De esta forma solo se escriben las operaciones reales de los slots ocupados.
+*/
 static void limpiar_nops_si_hay_operacion(BundleVLIW *b)
 {
     int s;
@@ -442,6 +620,11 @@ static void limpiar_nops_si_hay_operacion(BundleVLIW *b)
             memset(&b->op[s], 0, sizeof(b->op[s]));
 }
 
+/*
+    Primera fase de empaquetamiento: combina LSU y ALU.
+        Busca un LOAD seguido de un ADDI de constante a un registro temporal
+        independiente. Mueve el ADDI al bundle del LOAD y deja un NOP en el siguiente.
+*/
 static void fase_alu_lsu(ProgramaVLIW *p, const unsigned char *targets,
                          EstadisticasVLIW *st)
 {
@@ -454,6 +637,10 @@ static void fase_alu_lsu(ProgramaVLIW *p, const unsigned char *targets,
             !info_load(&a->op[SLOT_LSU], &rd_load, &base)) continue;
         if (cantidad_actuales(b) != 1 || !actual(&b->op[SLOT_ALU]) ||
             !es_addi_constante_temporal(&b->op[SLOT_ALU], &rd_addi)) continue;
+/*
+        La ALU no puede escribir el registro cargado por LSU ni su registro base.
+    Tampoco se mueve un ADDI si su bundle original es destino de un salto.
+*/
         if (rd_addi == rd_load || rd_addi == base || targets[i + 1]) continue;
         limpiar_nops_si_hay_operacion(a);
         mover_op(&a->op[SLOT_ALU], &b->op[SLOT_ALU]);
@@ -462,6 +649,10 @@ static void fase_alu_lsu(ProgramaVLIW *p, const unsigned char *targets,
     }
 }
 
+/*
+    Actualiza el offset textual de una instruccion de salto.
+        Conserva su operacion y operandos originales, sustituyendo el desplazamiento.
+*/
 static int ajustar_branch(OperacionVLIW *op, long nuevo)
 {
     char mn[16];
@@ -476,6 +667,11 @@ static int ajustar_branch(OperacionVLIW *op, long nuevo)
     return 1;
 }
 
+/*
+    Segunda fase de empaquetamiento: combina BRU con ALU o LSU.
+        Considera un ADDI independiente o un STORE previo a un salto,
+        comprueba dependencias y modifica el offset al mover el salto un bundle atras.
+*/
 static void fase_bru(ProgramaVLIW *p, const unsigned char *targets,
                      EstadisticasVLIW *st)
 {
@@ -501,14 +697,26 @@ static void fase_bru(ProgramaVLIW *p, const unsigned char *targets,
         else continue;
         if (!info_branch(branch, i + 1, p->cantidad, &off, &dest, lee, mn, sizeof(mn)))
             continue;
+/*
+        Evita fusionar cuando alguno de los bundles participa como destino
+    de un salto, ya que esto podria modificar el flujo de control.
+*/
         if (targets[i] || targets[i + 1]) continue;
         escrituras_bundle(a, escribe);
         if (interseccion(lee, escribe)) continue;
+/*
+        Revisa las escrituras de los bundles anteriores para evitar que
+    la condicion del salto lea un valor que aun no este disponible.
+*/
         for (j = i >= 2 ? i - 2 : 0; j < i; j++) {
             escrituras_bundle(&p->bundles[j], escribe);
             if (interseccion(lee, escribe)) break;
         }
         if (j < i) continue;
+/*
+        Al adelantar el salto un bundle, su PC retrocede 16 bytes.
+    Se suman 16 al offset para mantener exactamente la misma direccion destino.
+*/
         nuevo = off + 16;
         bits = strcmp(mn, "JMP") == 0 ? 20 : 12;
         if (nuevo < -(1L << (bits - 1)) || nuevo > (1L << (bits - 1)) - 1) continue;
@@ -522,6 +730,11 @@ static void fase_bru(ProgramaVLIW *p, const unsigned char *targets,
     }
 }
 
+/*
+    Tercera fase de empaquetamiento: agrupa FEIST con otras unidades.
+        Intenta mover una instruccion FEIST al siguiente bundle y revisa
+        conflictos de registros, redirecciones del PC y cambios de la boveda.
+*/
 static void fase_feist(ProgramaVLIW *p, const unsigned char *targets,
                        EstadisticasVLIW *st)
 {
@@ -539,18 +752,35 @@ static void fase_feist(ProgramaVLIW *p, const unsigned char *targets,
         memcpy(fw, f->info.escribe, 16);
         lecturas_bundle(b, br);
         escrituras_bundle(b, bw);
+/*
+        Comprueba conflictos entre FEIST y las otras unidades:
+    escrituras sobre el mismo destino, lecturas de valores escritos por FEIST
+    o escrituras que modificarian los valores leidos por FEIST.
+*/
         if (interseccion(fw, bw) || interseccion(fw, br) || interseccion(fr, bw)) continue;
         if (redireccion_pc_no_bru(b)) continue;
+/*
+        Antes de adelantar FEIST un ciclo, revisa si aun existen dependencias
+    con escrituras de bundles anteriores.
+*/
         for (j = i >= 3 ? i - 3 : 0; j < i; j++) {
             escrituras_bundle(&p->bundles[j], tmp);
             if (interseccion(fr, tmp)) { peligro = 1; break; }
         }
         if (peligro) continue;
+/*
+        Se revisan tambien las operaciones posteriores para impedir que
+    una lectura utilice el resultado de FEIST antes de estar disponible.
+*/
         for (j = i + 2; j < p->cantidad && j < i + 4; j++) {
             lecturas_bundle(&p->bundles[j], tmp);
             if (interseccion(fw, tmp)) { peligro = 1; break; }
         }
         if (peligro) continue;
+/*
+        Las instrucciones que alteran la boveda deben mantener una separacion
+    segura respecto a otras operaciones FEIST posteriores.
+*/
         if (feist_cambia_boveda(f)) {
             for (j = i + 2; j < p->cantidad && j < i + 4; j++)
                 if (actual(&p->bundles[j].op[SLOT_FEIST])) { peligro = 1; break; }
@@ -564,6 +794,11 @@ static void fase_feist(ProgramaVLIW *p, const unsigned char *targets,
     }
 }
 
+/*
+    Escribe el programa resultante como ensamblador.
+        Conserva las etiquetas por posicion, separa varias operaciones de
+        un bundle mediante | y escribe ALU: NOP si el bundle quedo vacio.
+*/
 static int escribir_programa(const char *ruta, const ProgramaVLIW *p, FILE *err)
 {
     FILE *f = fopen(ruta, "w");
@@ -573,6 +808,10 @@ static int escribir_programa(const char *ruta, const ProgramaVLIW *p, FILE *err)
         fprintf(err, "Empaquetador VLIW: no se pudo escribir %s\n", ruta);
         return 0;
     }
+/*
+        Recorre todas las posiciones, incluida la posterior al ultimo bundle,
+    para conservar incluso las etiquetas definidas al final del programa.
+*/
     for (i = 0; i <= p->cantidad; i++) {
         for (e = 0; e < p->cantidad_etiquetas; e++)
             if (p->etiquetas[e].bundle == i)
@@ -596,6 +835,12 @@ static int escribir_programa(const char *ruta, const ProgramaVLIW *p, FILE *err)
     return 1;
 }
 
+/*
+    Funcion principal del empaquetador VLIW.
+        Lee el ASM con offsets ya resueltos, identifica los destinos de salto,
+        ejecuta las tres fases de fusion y escribe el nuevo archivo ensamblador.
+        Devuelve si el proceso termino correctamente y libera sus recursos.
+*/
 int vliw_empaquetar_archivo(const char *entrada,
                             const char *salida,
                             FILE *reporte)
@@ -616,10 +861,19 @@ int vliw_empaquetar_archivo(const char *entrada,
         fprintf(stderr, "Empaquetador VLIW: el programa no contiene bundles\n");
         goto fin;
     }
+/*
+        Reserva una marca por bundle para reconocer las posiciones a las
+    que puede llegar una transferencia de control.
+*/
     targets = calloc(p.cantidad, 1u);
     if (targets == NULL) goto fin;
     marcar_destinos(&p, targets);
 
+/*
+        Se aplican las fusiones en orden: primero ALU+LSU, luego las
+    combinaciones con BRU y finalmente las instrucciones FEIST.
+    Los bundles vaciados se sustituyen por NOP y no se reduce el total.
+*/
     fase_alu_lsu(&p, targets, &st);
     fase_bru(&p, targets, &st);
     fase_feist(&p, targets, &st);
@@ -627,6 +881,10 @@ int vliw_empaquetar_archivo(const char *entrada,
     if (!escribir_programa(salida, &p, stderr)) goto fin;
     ok = 1;
 
+/*
+        Si se solicito un reporte, imprime el total de bundles conservados
+    y la cantidad de fusiones realizadas en cada fase.
+*/
     if (reporte != NULL) {
         fprintf(rep, "Empaquetado VLIW: %zu bundles conservados\n", p.cantidad);
         fprintf(rep, "  ALU + LSU: %zu\n", st.alu_lsu);
@@ -636,6 +894,10 @@ int vliw_empaquetar_archivo(const char *entrada,
         fprintf(rep, "  Bundles con 4 slots activos: %zu\n", st.cuatro_slots);
     }
 
+/*
+        Punto comun de limpieza para las salidas exitosas y los errores.
+    Si falla el empaquetamiento, elimina el archivo de salida incompleto.
+*/
 fin:
     if (!ok) remove(salida);
     free(targets);
