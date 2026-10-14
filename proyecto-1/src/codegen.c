@@ -1,14 +1,29 @@
+/*
+Incluye los modulos utilizados para convertir el AST en instrucciones de ensamblador.
+codegen define la interfaz de generacion, asm_emitter escribe las instrucciones,
+memoria aporta las convenciones de almacenamiento y scheduler controla dependencias.
+*/
 #include "codegen.h"
 #include "asm_emitter.h"
 #include "memoria.h"
 #include "scheduler.h"
 
+/*
+Bibliotecas estandar utilizadas para limites numericos, argumentos variables,
+entrada y salida, manejo de memoria y cadenas de texto.
+*/
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/*
+Define los registros reservados por el generador y los limites internos.
+x2 guarda el valor de retorno; x3 y x13 se usan como auxiliares.
+x4-x12 son temporales, x14 es SP y x15 es FP.
+Tambien establece limites de anidamiento, cantidad de parametros y tamano de datos.
+*/
 #define REG_RETORNO_VALOR 2
 #define REG_AUXILIAR 3
 #define REG_TEMP_PRIMERO 4
@@ -22,6 +37,12 @@
 #define PILA_INICIAL_DEFECTO MEMORIA_TOTAL_BYTES
 #define BYTES_TEMPORALES_GUARDADOS ((REG_TEMP_ULTIMO - REG_TEMP_PRIMERO + 1) * 4u)
 
+/*
+Almacena el estado utilizado mientras se recorre el AST y se genera ensamblador.
+Mantiene el emisor, scheduler, configuracion, uso de registros temporales,
+contador de etiquetas, contexto de funciones y pila de ciclos para rompa.
+El conteo de errores permite detectar si la generacion debe fallar.
+*/
 typedef struct {
     AsmEmitter emisor;
     Scheduler scheduler;
@@ -42,6 +63,12 @@ typedef struct {
     int usa_error_pila;
 } Codegen;
 
+/*----------------------------- FUNCIONES AUXILIARES DEL GENERADOR -----------------------------*/
+/*
+Busca el hijo en la posicion indicada dentro de un nodo del AST.
+Recorre la lista enlazada de hermanos y devuelve el nodo solicitado,
+o NULL si el padre no existe o no tiene esa cantidad de hijos.
+*/
 static NodoAST *hijo_n(NodoAST *nodo, unsigned indice)
 {
     NodoAST *hijo;
@@ -57,6 +84,11 @@ static NodoAST *hijo_n(NodoAST *nodo, unsigned indice)
     return hijo;
 }
 
+/*
+Muestra un error encontrado durante la generacion de codigo.
+Incluye la linea del AST cuando esta disponible, recibe un mensaje con
+formato variable y acumula el error para impedir una salida exitosa.
+*/
 static void error_codegen(Codegen *cg, NodoAST *nodo, const char *formato, ...)
 {
     va_list args;
@@ -75,6 +107,11 @@ static void error_codegen(Codegen *cg, NodoAST *nodo, const char *formato, ...)
 }
 
 
+/*
+Registra un nuevo ciclo en la pila de control para manejar ciclos anidados.
+Guarda las etiquetas a las que deberia saltar rompa y continue, verificando
+que la profundidad no supere el maximo permitido por el compilador.
+*/
 static int apilar_bucle(Codegen *cg,
                         NodoAST *nodo,
                         const char *etiqueta_break,
@@ -99,12 +136,20 @@ static int apilar_bucle(Codegen *cg,
     return 1;
 }
 
+/*
+Quita el contexto del ultimo ciclo al terminar de generar su cuerpo.
+Asi las instrucciones de control vuelven a referirse al ciclo exterior.
+*/
 static void desapilar_bucle(Codegen *cg)
 {
     if (cg->profundidad_bucle > 0)
         cg->profundidad_bucle--;
 }
 
+/*
+Obtiene la etiqueta de salida del ciclo mas interno.
+Si no existe un ciclo activo devuelve NULL para detectar rompa fuera de lugar.
+*/
 static const char *etiqueta_break_actual(const Codegen *cg)
 {
     if (cg->profundidad_bucle == 0)
@@ -113,6 +158,11 @@ static const char *etiqueta_break_actual(const Codegen *cg)
     return cg->pila_bucles[cg->profundidad_bucle - 1].etiqueta_break;
 }
 
+/*
+Busca un registro temporal disponible dentro del rango x4 a x12.
+Marca el registro como ocupado y devuelve su numero. Si no hay ninguno libre,
+registra el error correspondiente y devuelve -1.
+*/
 static int reservar_temp(Codegen *cg, NodoAST *nodo)
 {
     int reg;
@@ -130,12 +180,20 @@ static int reservar_temp(Codegen *cg, NodoAST *nodo)
     return -1;
 }
 
+/*
+Libera un registro temporal que ya no necesita el generador.
+Solo modifica el estado de los registros incluidos en el rango reservado.
+*/
 static void liberar_temp(Codegen *cg, int reg)
 {
     if (reg >= REG_TEMP_PRIMERO && reg <= REG_TEMP_ULTIMO)
         cg->temp_ocupado[reg] = 0;
 }
 
+/*
+Construye etiquetas diferentes para los saltos y bloques generados.
+Combina un prefijo con un contador incremental para evitar nombres repetidos.
+*/
 static void nueva_etiqueta(Codegen *cg,
                            const char *prefijo,
                            char *destino,
@@ -145,6 +203,14 @@ static void nueva_etiqueta(Codegen *cg,
              prefijo, cg->contador_etiquetas++);
 }
 
+/*----------------------------- EMISION DE INSTRUCCIONES Y SCHEDULER -----------------------------*/
+/*
+Centraliza la emision de instrucciones de ensamblador hacia un slot.
+Primero construye el texto, pide al scheduler las separaciones necesarias
+por dependencias de registros y emite NOPs cuando se requieren.
+Luego registra escrituras y agrega una barrera si una operacion modifica el PC.
+El empaquetamiento de varias FUs ocurre en una fase posterior del compilador.
+*/
 static int emitir_instruccion(Codegen *cg,
                               const char *slot,
                               const char *formato,
@@ -174,6 +240,10 @@ static int emitir_instruccion(Codegen *cg,
         return 0;
     }
 
+    /*
+    Consulta cuantos paquetes vacios requiere el pipeline para evitar
+    leer registros que aun no han sido escritos por instrucciones anteriores.
+    */
     nops = scheduler_nops_necesarios(&cg->scheduler,
                                      &info,
                                      asm_bundle_actual(&cg->emisor));
@@ -186,6 +256,10 @@ static int emitir_instruccion(Codegen *cg,
         }
     }
 
+    /*
+    Obtiene la posicion del bundle antes de emitir la instruccion.
+    Esta direccion se usa para registrar las futuras dependencias RAW.
+    */
     bundle_instruccion = asm_bundle_actual(&cg->emisor);
     if (!asm_emitir_slot(&cg->emisor, slot, "%s", texto)) {
         cg->errores++;
@@ -220,6 +294,11 @@ static int emitir_instruccion(Codegen *cg,
     return 1;
 }
 
+/*
+Carga una constante entera de 32 bits en un registro del procesador.
+Si el valor cabe en el inmediato de ADDI utiliza una sola instruccion;
+en otro caso construye sus bits mediante desplazamientos y sumas.
+*/
 static int emitir_constante(Codegen *cg, int reg, int32_t valor)
 {
     uint32_t bits;
@@ -251,6 +330,12 @@ static int emitir_constante(Codegen *cg, int reg, int32_t valor)
     return emitir_instruccion(cg, "ALU", "ADDI x%d, x%d, %u", reg, reg, byte3);
 }
 
+/*----------------------------- RESOLUCION DE SIMBOLOS Y ACCESO A MEMORIA -----------------------------*/
+/*
+Consulta la informacion semantica de una variable o funcion.
+Prefiere resolver por nodo del AST para respetar el ambito del identificador,
+y conserva el resolvedor por nombre como compatibilidad con otras pruebas.
+*/
 static int resolver(Codegen *cg,
                     NodoAST *nodo,
                     const char *nombre,
@@ -297,11 +382,20 @@ static int resolver(Codegen *cg,
     return 1;
 }
 
+/*
+Comprueba si un desplazamiento cabe en el inmediato con signo de 12 bits.
+Se utiliza para decidir entre una instruccion directa o construir el offset.
+*/
 static int offset_cabe_imm12(long offset)
 {
     return offset >= -2048 && offset <= 2047;
 }
 
+/*
+Modifica x14 (SP) para reservar o liberar memoria en la pila.
+Si el desplazamiento es pequeno usa ADDI; en caso contrario lo carga
+en un registro auxiliar y realiza la suma mediante la ALU.
+*/
 static int emitir_ajuste_sp(Codegen *cg, long delta)
 {
     if (delta == 0)
@@ -325,6 +419,10 @@ static int emitir_ajuste_sp(Codegen *cg, long delta)
                               REG_SP, REG_SP, REG_AUXILIAR);
 }
 
+/*
+Calcula una direccion relativa al frame pointer x15 (FP).
+Para offsets cortos usa ADDI y para offsets grandes utiliza x3 como auxiliar.
+*/
 static int emitir_direccion_fp(Codegen *cg, int reg_destino, long offset)
 {
     if (offset_cabe_imm12(offset))
@@ -395,6 +493,11 @@ static int emitir_base_simbolo(Codegen *cg,
     return 0;
 }
 
+/*
+Genera las instrucciones para leer una variable y dejar su valor
+en un registro temporal. Distingue entre direcciones globales, posiciones
+en el marco de pila y parametros recibidos por referencia.
+*/
 static int cargar_variable(Codegen *cg, NodoAST *nodo, const char *nombre)
 {
     CodegenSimbolo simbolo;
@@ -440,6 +543,11 @@ static int cargar_variable(Codegen *cg, NodoAST *nodo, const char *nombre)
     return reg;
 }
 
+/*
+Genera las instrucciones STORE necesarias para asignar un valor
+a una variable. Resuelve su ubicacion y el desplazamiento respecto a FP,
+y evita intentar asignar un arreglo completo por referencia.
+*/
 static int guardar_variable(Codegen *cg,
                             NodoAST *identificador,
                             const char *nombre,
@@ -508,6 +616,11 @@ static NodoAST *buscar_funcion_ast(Codegen *cg, const char *nombre)
 static int generar_expresion(Codegen *cg, NodoAST *nodo);
 static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado);
 
+/*----------------------------- CONDICIONES Y SALTOS DE CONTROL -----------------------------*/
+/*
+Identifica si un operador del AST corresponde a una comparacion.
+Separa los operadores relacionales de los aritmeticos antes de generar codigo.
+*/
 static int es_comparador(const char *op)
 {
     return op != NULL &&
@@ -709,6 +822,11 @@ static int emitir_salto_condicion(Codegen *cg,
     return ok;
 }
 
+/*
+Convierte el resultado de una condicion en un entero booleano 0 o 1.
+Emite etiquetas y saltos para escribir el valor correspondiente y devuelve
+el registro temporal que contiene el resultado de la comparacion.
+*/
 static int generar_booleano_desde_condicion(Codegen *cg, NodoAST *nodo)
 {
     int reg;
@@ -723,6 +841,10 @@ static int generar_booleano_desde_condicion(Codegen *cg, NodoAST *nodo)
                    sizeof(etiqueta_verdadero));
     nueva_etiqueta(cg, "fin_bool", etiqueta_fin, sizeof(etiqueta_fin));
 
+    /*
+    La condicion salta a la rama verdadera; de lo contrario escribe cero
+    y salta al final, donde ambos caminos comparten el mismo resultado.
+    */
     if (!emitir_salto_condicion(cg, nodo, etiqueta_verdadero, 1) ||
         !emitir_constante(cg, reg, 0) ||
         !emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_fin) ||
@@ -737,6 +859,7 @@ static int generar_booleano_desde_condicion(Codegen *cg, NodoAST *nodo)
 }
 
 
+/*----------------------------- OPERACIONES ARITMETICAS IMPLEMENTADAS POR SOFTWARE -----------------------------*/
 /*
  * Multiplicacion entera de 32 bits implementada unicamente con
  * instrucciones que existen en la ISA del procesador.
@@ -1284,6 +1407,7 @@ error:
 }
 
 
+/*----------------------------- ACCESO A LISTAS, MATRICES Y SUS INICIALIZADORES -----------------------------*/
 /*
  * Calcula la direccion byte efectiva de un acceso a lista o matriz y la
  * deja en x13 (REG_DIRECCION). Los enteros ocupan 4 bytes.
@@ -1425,6 +1549,10 @@ static int generar_direccion_acceso(Codegen *cg, NodoAST *nodo)
     }
 }
 
+/*
+Carga un elemento de lista o matriz desde su direccion calculada.
+Utiliza x13 como direccion efectiva y deja el dato en un temporal libre.
+*/
 static int cargar_acceso(Codegen *cg, NodoAST *nodo)
 {
     int reg;
@@ -1446,6 +1574,10 @@ static int cargar_acceso(Codegen *cg, NodoAST *nodo)
     return reg;
 }
 
+/*
+Almacena un valor en una posicion de lista o matriz.
+Primero calcula la direccion efectiva y luego emite el STORE correspondiente.
+*/
 static int guardar_acceso(Codegen *cg, NodoAST *nodo, int reg_valor)
 {
     if (!generar_direccion_acceso(cg, nodo))
@@ -1502,6 +1634,7 @@ static int guardar_elemento_literal(Codegen *cg,
 
 
 
+/*----------------------------- FUNCIONES Y CONVENCION DE LLAMADAS -----------------------------*/
 /* Empuja una palabra de 32 bits en la pila. */
 static int emitir_push_reg(Codegen *cg, int reg)
 {
@@ -1637,6 +1770,10 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
         args[cantidad_argumentos++] = a;
     }
 
+    /*
+    Antes de emitir la llamada se comprueba que la cantidad de argumentos
+    coincida con la firma de la funcion recuperada del AST.
+    */
     if (cantidad_parametros != cantidad_argumentos) {
         error_codegen(cg, nodo,
                       "la funcion '%s' espera %u argumentos y recibio %u",
@@ -1651,6 +1788,10 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
         return -1;
     }
 
+    /*
+    Calcula la reserva total necesaria para temporales, parametros,
+    cabecera del nuevo marco y variables locales de la funcion llamada.
+    */
     reserva64 = (uint64_t)BYTES_TEMPORALES_GUARDADOS +
                 simbolo_funcion.tamano_parametros +
                 TAMANO_CABECERA +
@@ -1792,6 +1933,13 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
     return reg_resultado;
 }
 
+/*----------------------------- GENERACION DE EXPRESIONES Y SENTENCIAS -----------------------------*/
+/*
+Recorre recursivamente una expresion del AST y devuelve el registro
+que contiene su resultado. Atiende constantes, booleanos, variables,
+arreglos, llamadas, operaciones aritmeticas y expresiones logicas.
+Libera temporales intermedios cuando dejan de ser necesarios.
+*/
 static int generar_expresion(Codegen *cg, NodoAST *nodo)
 {
     int izq, der, reg;
@@ -1923,6 +2071,10 @@ static int generar_expresion(Codegen *cg, NodoAST *nodo)
 
 static void generar_nodo(Codegen *cg, NodoAST *nodo);
 
+/*
+Recorre los nodos hermanos que componen una lista de sentencias.
+Invoca generar_nodo para procesarlos en su orden original.
+*/
 static void generar_lista_hermanos(Codegen *cg, NodoAST *nodo)
 {
     while (nodo != NULL) {
@@ -1931,6 +2083,11 @@ static void generar_lista_hermanos(Codegen *cg, NodoAST *nodo)
     }
 }
 
+/*
+Genera el codigo de una declaracion de variable escalar.
+Si existe una expresion inicial la evalua y guarda en la ubicacion
+asignada al simbolo; sin inicializador no escribe su contenido.
+*/
 static void generar_declaracion(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *variable = hijo_n(nodo, 0);
@@ -1957,6 +2114,11 @@ static void generar_declaracion(Codegen *cg, NodoAST *nodo)
     liberar_temp(cg, reg);
 }
 
+/*
+Genera una asignacion evaluando primero la expresion del lado derecho.
+Despues decide si el destino es una variable, una lista o una matriz
+y almacena el resultado en la direccion que corresponde.
+*/
 static void generar_asignacion(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *destino = hijo_n(nodo, 0);
@@ -1991,6 +2153,11 @@ static void generar_asignacion(Codegen *cg, NodoAST *nodo)
     liberar_temp(cg, reg);
 }
 
+/*
+Genera la inicializacion de una lista a partir de sus elementos del AST.
+Consulta el tamano en la tabla de simbolos, verifica que los indices
+no excedan la dimension y calcula el offset de cada entero en memoria.
+*/
 static void generar_declaracion_lista(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *variable = hijo_n(nodo, 0);
@@ -2029,6 +2196,10 @@ static void generar_declaracion_lista(Codegen *cg, NodoAST *nodo)
         return;
     }
 
+    /*
+    Cada elemento se almacena consecutivamente, considerando
+    que los enteros ocupan cuatro bytes en la memoria de datos.
+    */
     for (elemento = inicializador->hijo;
          elemento != NULL;
          elemento = elemento->siguiente, indice++) {
@@ -2055,6 +2226,11 @@ static void generar_declaracion_lista(Codegen *cg, NodoAST *nodo)
     }
 }
 
+/*
+Genera la inicializacion de matrices en orden por filas (row-major).
+Recorre filas y columnas, valida el espacio declarado y obtiene
+el desplazamiento de cada elemento antes de emitir su almacenamiento.
+*/
 static void generar_declaracion_matriz(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *variable = hijo_n(nodo, 0);
@@ -2096,6 +2272,10 @@ static void generar_declaracion_matriz(Codegen *cg, NodoAST *nodo)
         return;
     }
 
+    /*
+    Recorre las filas declaradas y valida su dimension antes de
+    calcular la posicion lineal de cada columna.
+    */
     for (fila = inicializador->hijo;
          fila != NULL;
          fila = fila->siguiente, indice_fila++) {
@@ -2150,6 +2330,7 @@ static void generar_declaracion_matriz(Codegen *cg, NodoAST *nodo)
 
 static void generar_nodo(Codegen *cg, NodoAST *nodo);
 
+/*----------------------------- ESTRUCTURAS DE CONTROL Y SALTOS -----------------------------*/
 /*
  * Genera una rama de una cadena si / sinosi / sino.
  * El parser representa "sino" directamente como AST_BLOQUE y cada
@@ -2207,6 +2388,10 @@ static void generar_rama_if(Codegen *cg,
     }
 }
 
+/*
+Crea la etiqueta que marca el final de una cadena si/sinosi/sino.
+Delega el recorrido de cada rama a generar_rama_if y emite el destino final.
+*/
 static void generar_if(Codegen *cg, NodoAST *nodo)
 {
     char etiqueta_fin[64];
@@ -2216,6 +2401,11 @@ static void generar_if(Codegen *cg, NodoAST *nodo)
     asm_emitir_etiqueta(&cg->emisor, etiqueta_fin);
 }
 
+/*
+Traduce un ciclo mientras usando una etiqueta de entrada, una condicion
+y una etiqueta de salida. Si la condicion es falsa salta fuera del ciclo;
+si es verdadera genera el cuerpo y vuelve al inicio.
+*/
 static void generar_while(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *condicion = hijo_n(nodo, 0);
@@ -2261,6 +2451,11 @@ static void generar_while(Codegen *cg, NodoAST *nodo)
         cg->errores++;
 }
 
+/*
+Traduce un ciclo para separando inicializacion, condicion, cuerpo
+y actualizacion. Registra las etiquetas del ciclo para los saltos de rompa
+y emite el regreso a la condicion despues de cada incremento.
+*/
 static void generar_for(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *inicializacion = hijo_n(nodo, 0);
@@ -2322,6 +2517,10 @@ static void generar_for(Codegen *cg, NodoAST *nodo)
         cg->errores++;
 }
 
+/*
+Traduce rompa a un salto BRU hacia el final del ciclo activo.
+Si no existe un ciclo en la pila de contextos reporta un error.
+*/
 static void generar_break(Codegen *cg, NodoAST *nodo)
 {
     const char *destino = etiqueta_break_actual(cg);
@@ -2336,6 +2535,11 @@ static void generar_break(Codegen *cg, NodoAST *nodo)
     emitir_instruccion(cg, "BRU", "JMP %s", destino);
 }
 
+/*
+Genera el retorno de una funcion con devuelva.
+Calcula la expresion, copia su valor al registro x2 y salta al epilogo
+compartido de la funcion para restaurar el marco correspondiente.
+*/
 static void generar_return(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *expresion;
@@ -2374,6 +2578,13 @@ static void generar_return(Codegen *cg, NodoAST *nodo)
     liberar_temp(cg, reg);
 }
 
+/*----------------------------- CUERPOS DE FUNCIONES Y PUNTO DE ENTRADA -----------------------------*/
+/*
+Genera el codigo ensamblador de una funcion definida en el AST.
+Emite su etiqueta, reserva variables locales y prepara el marco de pila.
+Despues del cuerpo genera el epilogo para recuperar FP, SP y la direccion
+de retorno utilizando la convencion de llamadas acordada con la ISA.
+*/
 static void generar_funcion(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *nombre = hijo_n(nodo, 0);
@@ -2480,6 +2691,11 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
              "%s", retorno_anterior);
 }
 
+/*
+Genera el punto de entrada principal sin asumir una funcion llamadora.
+Inicializa FP con SP, reserva memoria para sus variables locales,
+genera las sentencias y al terminar salta a fin_programa.
+*/
 static void generar_principal(Codegen *cg, NodoAST *nodo)
 {
     CodegenSimbolo simbolo_principal;
@@ -2517,6 +2733,11 @@ static void generar_principal(Codegen *cg, NodoAST *nodo)
     emitir_instruccion(cg, "BRU", "JMP fin_programa");
 }
 
+/*
+Organiza la generacion de todo el programa en varias pasadas.
+Primero inicializa la pila y los simbolos globales, despues genera
+las funciones y finalmente el cuerpo de principal como punto de entrada.
+*/
 static void generar_programa(Codegen *cg, NodoAST *nodo)
 {
     NodoAST *actual;
@@ -2557,6 +2778,7 @@ static void generar_programa(Codegen *cg, NodoAST *nodo)
 }
 
 
+/*----------------------------- INSTRUCCIONES ESPECIALES DE FEISTEL -----------------------------*/
 /* FEIST_E_INTEGRACION_2026 */
 /* Las llamadas especiales FEIST no pasan por la convención de funciones. */
 static int es_intrinseca_feist(const char *s)
@@ -2566,6 +2788,11 @@ static int es_intrinseca_feist(const char *s)
          !strcmp(s, "feist_fround") || !strcmp(s, "feist_logout"));
 }
 
+/*
+Obtiene un inmediato literal del AST para las operaciones criptograficas.
+Verifica que sea un numero entero y que pertenezca al rango permitido
+por el campo de la instruccion FEIST.
+*/
 static int inmediato_feist(NodoAST *n, int maximo)
 {
     char *fin = NULL;
@@ -2606,6 +2833,10 @@ static void generar_intrinseca_feist(Codegen *cg, NodoAST *n)
         (void)emitir_instruccion(cg, "FEIST", "LOGOUT");
         return;
     }
+    /*
+    KSTORE guarda una subllave en la boveda. La llave y ronda se
+    codifican como inmediatos y el valor se obtiene de una expresion.
+    */
     if (!strcmp(nombre, "feist_kstore")) {
         llave = inmediato_feist(a[0], 3);
         ronda = inmediato_feist(a[1], 3);
@@ -2618,6 +2849,10 @@ static void generar_intrinseca_feist(Codegen *cg, NodoAST *n)
         ok = emitir_instruccion(cg, "FEIST", "KSTORE %d, %d, x%d", llave, ronda, t[0]);
         goto fin;
     }
+    /*
+    AUTH utiliza dos expresiones como credenciales en registros
+    para solicitar autorizacion a la unidad de criptografia.
+    */
     if (!strcmp(nombre, "feist_auth")) {
         t[0] = generar_expresion(cg, a[0]);
         if (t[0] < 0) goto fin;
@@ -2626,6 +2861,10 @@ static void generar_intrinseca_feist(Codegen *cg, NodoAST *n)
         ok = emitir_instruccion(cg, "FEIST", "AUTH x%d, x%d", t[0], t[1]);
         goto fin;
     }
+    /*
+    FROUND recibe dos destinos, dos fuentes y los inmediatos de llave,
+    ronda y modo. Despues de emitirla guarda las mitades resultantes.
+    */
     if (!strcmp(nombre, "feist_fround")) {
         llave = inmediato_feist(a[4], 3);
         ronda = inmediato_feist(a[5], 3);
@@ -2664,6 +2903,12 @@ fin:
     (void)ok; /* Las fallas de emitir/guardar ya incrementan cg->errores. */
 }
 
+/*----------------------------- RECORRIDO DEL AST Y GENERACION DEL ARCHIVO -----------------------------*/
+/*
+Selecciona la rutina de generacion segun el tipo del nodo AST.
+Sirve como punto de despacho para declaraciones, asignaciones,
+condicionales, ciclos, funciones, llamadas y sentencias especiales.
+*/
 static void generar_nodo(Codegen *cg, NodoAST *nodo)
 {
     if (nodo == NULL)
@@ -2739,6 +2984,12 @@ static void generar_nodo(Codegen *cg, NodoAST *nodo)
     }
 }
 
+/*
+Funcion principal de la fase de generacion de ensamblador.
+Inicializa el estado del generador y del scheduler, abre el archivo de salida,
+recorre el AST y agrega las etiquetas de fin o de error de pila.
+Al terminar cierra el emisor y devuelve si no ocurrieron errores.
+*/
 int codegen_generar_archivo(NodoAST *raiz,
                             const char *ruta_salida,
                             const CodegenConfig *config)
@@ -2765,6 +3016,10 @@ int codegen_generar_archivo(NodoAST *raiz,
     asm_emitir_comentario(&cg.emisor,
                           "NOPs calculados por scheduler RAW para IF-ID-RR-EX-WB");
 
+    /*
+    Inicia el recorrido del AST. En esta fase se emite ensamblador
+    con NOPs de planificacion; el empaquetado VLIW ocurre posteriormente.
+    */
     generar_nodo(&cg, raiz);
 
     if (!cg.encontro_principal)

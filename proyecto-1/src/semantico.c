@@ -1,3 +1,8 @@
+/*
+    Incluye los modulos utilizados en el analisis semantico.
+    semantico.h proporciona las estructuras del AST y la tabla de simbolos,
+    y las bibliotecas de C permiten revisar valores y reportar errores.
+*/
 #include "semantico.h"
 #include <limits.h>
 #include <stdio.h>
@@ -5,7 +10,12 @@
 #include <string.h>
 
 /* La tabla ya fue construida por Bison. Solo marcamos las declaraciones
-   que se han encontrado durante el recorrido, sin alterar la tabla. */
+   que se han encontrado durante el recorrido, sin alterar la tabla. 
+   
+    Estado utilizado mientras se recorre el arbol sintactico para realizar el analisis semantico.
+    Conserva la tabla de simbolos, el resolvedor de ambitos y las variables que ya fueron declaradas.
+    Tambien mantiene informacion de la funcion actual, su retorno y los ciclos anidados.
+*/
 typedef struct {
     const TablaSimbolos *tabla;
     SemanticoResolverAmbito resolver;
@@ -19,6 +29,10 @@ typedef struct {
     unsigned retornos_encontrados;
 } EstadoSemantico;
 
+/*
+    Obtiene el hijo del AST que se encuentra en la posicion indicada.
+    Recorre los nodos hermanos desde el primer hijo y retorna NULL cuando no existe.
+*/
 static const NodoAST *hijo_n(const NodoAST *n, unsigned pos)
 {
     const NodoAST *h = n ? n->hijo : NULL;
@@ -26,6 +40,12 @@ static const NodoAST *hijo_n(const NodoAST *n, unsigned pos)
     return h;
 }
 
+/*
+    Busca un identificador desde el ambito donde aparece hasta sus ambitos padres.
+    Para las variables, comprueba si ya se habia encontrado su declaracion durante el recorrido.
+    Si existe en la tabla pero aun no fue declarada, lo indica mediante posterior.
+    Los parametros y las funciones no utilizan este control de orden de declaracion.
+*/
 static const Simbolo *buscar_en_orden(
     const NodoAST *ident, const EstadoSemantico *e, int *posterior)
 {
@@ -47,12 +67,21 @@ static const Simbolo *buscar_en_orden(
     return NULL;
 }
 
+/*
+    Busca una funcion por nombre directamente en el ambito global de la tabla de simbolos.
+    Se utiliza para validar llamadas y obtener sus tipos de retorno y parametros.
+*/
 static const Simbolo *buscar_funcion(const EstadoSemantico *e, const char *nombre)
 {
     if (!nombre) return NULL;
     return ts_buscar_local(e->tabla, nombre, e->tabla->ambito_global);
 }
 
+/*
+    Marca una variable como declarada despues de haber revisado su declaracion en el AST.
+    Obtiene el identificador y su ambito original para localizar el simbolo correcto.
+    Esta marca permite detectar el uso de variables antes de declararlas.
+*/
 static void registrar_declaracion(const NodoAST *n, EstadoSemantico *e)
 {
     const NodoAST *id = hijo_n(n, 0);
@@ -64,20 +93,33 @@ static void registrar_declaracion(const NodoAST *n, EstadoSemantico *e)
         (size_t)s->id < e->cantidad) e->declarados[s->id] = 1;
 }
 
+/*
+    Identifica los operadores aritmeticos admitidos por el lenguaje.
+    Incluye suma, resta, multiplicacion, division, modulo y potencia.
+*/
 static int es_arit(const char *s)
 {
     return !strcmp(s, "+") || !strcmp(s, "-") || !strcmp(s, "*") ||
            !strcmp(s, "/") || !strcmp(s, "%") || !strcmp(s, "**");
 }
+/*
+    Comprueba si el operador realiza una comparacion de orden entre expresiones.
+*/
 static int es_orden(const char *s)
 {
     return !strcmp(s, "<") || !strcmp(s, ">") ||
            !strcmp(s, "<=") || !strcmp(s, ">=");
 }
+/*
+    Identifica los operadores utilizados para comparar igualdad o diferencia.
+*/
 static int es_igualdad(const char *s)
 {
     return !strcmp(s, "==") || !strcmp(s, "!=");
 }
+/*
+    Identifica los operadores logicos AND y OR del lenguaje.
+*/
 static int es_logico(const char *s)
 {
     return !strcmp(s, "AND") || !strcmp(s, "OR");
@@ -85,7 +127,13 @@ static int es_logico(const char *s)
 
 static int es_intrinseca_feist(const char *s);
 
-/* La inferencia de tipos no emite errores: los emite la validacion del nodo. */
+
+/*
+    Determina el tipo de una expresion a partir del nodo del AST y la tabla de simbolos.
+    Reconoce literales, variables, llamadas, accesos a arreglos y operaciones.
+    Devuelve TIPO_DESCONOCIDO cuando no puede establecer un tipo compatible.
+    No reporta errores directamente: las funciones de validacion los informan.
+*/
 static TipoDato inferir_tipo(const NodoAST *n, const EstadoSemantico *e)
 {
     if (!n) return TIPO_DESCONOCIDO;
@@ -99,12 +147,20 @@ static TipoDato inferir_tipo(const NodoAST *n, const EstadoSemantico *e)
                s->forma == FORMA_ESCALAR ? s->tipo : TIPO_DESCONOCIDO;
     }
 
+    /*
+        Las llamadas ordinarias toman su tipo de la firma de la funcion.
+        Las intrinsecas FEIST se consideran operaciones sin valor de retorno.
+    */
     if (n->tipo == AST_LLAMADA) {
         if (es_intrinseca_feist(n->valor)) return TIPO_VACIO;
         const Simbolo *s = buscar_funcion(e, n->valor);
         return s && s->categoria == SIM_FUNCION ? s->tipo : TIPO_DESCONOCIDO;
     }
 
+    /*
+        En un acceso a lista o matriz, el tipo resultante corresponde al elemento,
+        siempre que el simbolo tenga la forma esperada para ese acceso.
+    */
     if (n->tipo == AST_ACCESO_LISTA || n->tipo == AST_ACCESO_MATRIZ) {
         const NodoAST *id = hijo_n(n, 0);
         const Simbolo *s = buscar_en_orden(id, e, NULL);
@@ -136,7 +192,12 @@ static TipoDato inferir_tipo(const NodoAST *n, const EstadoSemantico *e)
     return TIPO_DESCONOCIDO;
 }
 
-/* API sencilla, util para pruebas unitarias independientes. */
+
+/*
+    Comprueba que un identificador exista como variable o parametro en el ambito recibido.
+    Recorre los ambitos padres y reporta errores cuando no existe o no es una variable.
+    Esta funcion puede utilizarse de forma independiente en pruebas del semantico.
+*/
 int semantico_validar_variable(const NodoAST *v, const TablaSimbolos *t,
                               const Ambito *ambito)
 {
@@ -158,6 +219,11 @@ int semantico_validar_variable(const NodoAST *v, const TablaSimbolos *t,
     return 1;
 }
 
+/*
+    Verifica que una variable utilizada en una expresion haya sido declarada previamente.
+    Distingue entre una variable inexistente y una existente usada antes de su declaracion.
+    Tambien rechaza identificadores que correspondan a otra categoria de simbolo.
+*/
 static int validar_uso(const NodoAST *n, const EstadoSemantico *e)
 {
     int posterior = 0;
@@ -176,6 +242,12 @@ static int validar_uso(const NodoAST *n, const EstadoSemantico *e)
     return 0;
 }
 
+/*
+    Comprueba que los operandos sean compatibles con el operador utilizado.
+    Las operaciones aritmeticas y de orden requieren enteros; AND y OR requieren vof.
+    Las comparaciones de igualdad exigen tipos iguales y no permiten vacio.
+    Retorna la cantidad de errores detectados en la operacion.
+*/
 static int validar_operacion(const NodoAST *n, const EstadoSemantico *e)
 {
     if (!n->valor) return 0;
@@ -205,6 +277,11 @@ static int validar_operacion(const NodoAST *n, const EstadoSemantico *e)
     return 0;
 }
 
+/*
+    Compara el tipo inferido de una expresion con el tipo que exige su contexto.
+    Se reutiliza para declaraciones, asignaciones y valores de retorno.
+    Si el tipo es desconocido, evita duplicar errores que pueden detectarse en otro nodo.
+*/
 static int validar_tipo_esperado(const NodoAST *n, const NodoAST *valor,
                                  TipoDato esperado, const EstadoSemantico *e,
                                  const char *descripcion)
@@ -219,6 +296,11 @@ static int validar_tipo_esperado(const NodoAST *n, const NodoAST *valor,
     return 0;
 }
 
+/*
+    Revisa el tipo del inicializador de una variable escalar.
+    Obtiene el tipo declarado, entero o vof, y verifica que la expresion sea compatible.
+    Si no existe inicializador no se requiere una comparacion de tipos.
+*/
 static int validar_declaracion_escalar(const NodoAST *n, const EstadoSemantico *e)
 {
     const NodoAST *valor = hijo_n(n, 1);
@@ -230,6 +312,11 @@ static int validar_declaracion_escalar(const NodoAST *n, const EstadoSemantico *
     return validar_tipo_esperado(n, valor, esperado, e, "al declarar variable");
 }
 
+/*
+    Comprueba que el valor asignado tenga el tipo esperado por el destino.
+    Impide asignar directamente una lista o matriz completa a una variable.
+    Permite validar destinos escalares y elementos individuales de arreglos.
+*/
 static int validar_destino_y_asignacion(const NodoAST *n, const EstadoSemantico *e)
 {
     const NodoAST *dest = hijo_n(n, 0);
@@ -248,6 +335,11 @@ static int validar_destino_y_asignacion(const NodoAST *n, const EstadoSemantico 
     return validar_tipo_esperado(n, valor, esperado, e, "en asignacion");
 }
 
+/*
+    Valida el acceso a una lista o matriz segun su forma en la tabla de simbolos.
+    Revisa que el identificador corresponda a la estructura esperada y que sus indices sean enteros.
+    Los errores de identificadores no declarados se reportan en validar_uso.
+*/
 static int validar_acceso(const NodoAST *n, const EstadoSemantico *e)
 {
     const NodoAST *id = hijo_n(n, 0);
@@ -273,7 +365,12 @@ static int validar_acceso(const NodoAST *n, const EstadoSemantico *e)
     return errores;
 }
 
-/* Lee dimensiones constantes solamente; dimensiones dinamicas no son evaluables aqui. */
+
+/*
+    Intenta convertir una dimension escrita como texto a un numero entero no negativo.
+    Devuelve verdadero solo cuando la dimension puede interpretarse como constante.
+    Se utiliza para comparar las dimensiones declaradas con los inicializadores.
+*/
 static int dimension_constante(const char *str, long *numero)
 {
     if (!str || !*str) return 0;
@@ -284,6 +381,10 @@ static int dimension_constante(const char *str, long *numero)
     return 1;
 }
 
+/*
+    Verifica que las dimensiones declaradas para listas y matrices tengan tipo entero.
+    Consulta las dimensiones del AST y su simbolo, sin calcular aqui el espacio de memoria.
+*/
 static int validar_dimensiones(const NodoAST *n, const EstadoSemantico *e)
 {
     const NodoAST *id = hijo_n(n, 0);
@@ -305,6 +406,12 @@ static int validar_dimensiones(const NodoAST *n, const EstadoSemantico *e)
     return errores;
 }
 
+/*
+    Valida los inicializadores de listas y matrices.
+    Comprueba que los elementos sean enteros y, si las dimensiones son constantes,
+    verifica que coincidan la cantidad de elementos, filas y columnas declaradas.
+    Acumula los errores para continuar revisando el resto de la coleccion.
+*/
 static int validar_literal_coleccion(const NodoAST *n, const EstadoSemantico *e)
 {
     const NodoAST *id = hijo_n(n, 0);
@@ -365,9 +472,11 @@ static int validar_literal_coleccion(const NodoAST *n, const EstadoSemantico *e)
 }
 
 
-/* FEIST_E_INTEGRACION_2026 */
 /* Intrinsecas FEIST: llamadas que no necesitan simbolo de funcion.
-   Reservadas para sentencias; los argumentos especiales son inmediatos ISA. */
+   Reservadas para sentencias; los argumentos especiales son inmediatos ISA. 
+    Reconoce las llamadas especiales FEIST admitidas por el lenguaje.
+    Estas operaciones se validan como instrucciones de la ISA y no como funciones normales.
+*/
 static int es_intrinseca_feist(const char *s)
 {
     return s != NULL &&
@@ -375,6 +484,10 @@ static int es_intrinseca_feist(const char *s)
          !strcmp(s, "feist_fround") || !strcmp(s, "feist_logout"));
 }
 
+/*
+    Comprueba que un argumento FEIST sea un numero literal dentro del rango permitido.
+    Se utiliza para los campos inmediatos de llave, ronda y modo.
+*/
 static int literal_feist(const NodoAST *n, long minimo, long maximo)
 {
     char *fin = NULL;
@@ -385,6 +498,12 @@ static int literal_feist(const NodoAST *n, long minimo, long maximo)
     return fin != NULL && *fin == '\0' && x >= minimo && x <= maximo;
 }
 
+/*
+    Valida las instrucciones especiales AUTH, KSTORE, FROUND y LOGOUT.
+    Verifica su cantidad de argumentos, los inmediatos permitidos y los tipos de los operandos.
+    Para FROUND tambien exige dos destinos distintos, enteros escalares y declarados.
+    Devuelve la cantidad de errores semanticos encontrados en la llamada.
+*/
 static int validar_intrinseca_feist(const NodoAST *n, const EstadoSemantico *e)
 {
     const NodoAST *args[7] = {NULL};
@@ -401,6 +520,10 @@ static int validar_intrinseca_feist(const NodoAST *n, const EstadoSemantico *e)
         if (recibidos < 7) args[recibidos] = a;
         recibidos++;
     }
+    /*
+        Cada instruccion FEIST exige una cantidad fija de argumentos.
+        Una cantidad incorrecta detiene la validacion de esa llamada.
+    */
     if (recibidos != esperados) {
         fprintf(stderr, "Error semantico en linea %d: '%s' espera %d argumentos, recibio %d.\n",
                 n->linea, nombre, esperados, recibidos);
@@ -461,6 +584,11 @@ static int validar_intrinseca_feist(const NodoAST *n, const EstadoSemantico *e)
     return errores;
 }
 
+/*
+    Revisa una llamada a funcion o intrinseca FEIST reconocida en el AST.
+    Para funciones normales busca su firma global, comprueba cantidad de argumentos
+    y compara sus tipos y formas, incluyendo parametros de lista o matriz.
+*/
 static int validar_llamada(const NodoAST *n, const EstadoSemantico *e)
 {
     if (!n->valor) return 1;
@@ -479,6 +607,9 @@ static int validar_llamada(const NodoAST *n, const EstadoSemantico *e)
     }
     int recibidos = 0;
     for (const NodoAST *a = n->hijo; a; a = a->siguiente) recibidos++;
+    /*
+        La cantidad de argumentos debe coincidir con los parametros de la firma.
+    */
     if (recibidos != fn->cantidad_parametros) {
         fprintf(stderr,
                 "Error semantico en linea %d: funcion '%s' espera %d argumentos, pero recibio %d.\n",
@@ -516,6 +647,11 @@ static int validar_llamada(const NodoAST *n, const EstadoSemantico *e)
     return errores;
 }
 
+/*
+    Comprueba el uso de devuelva dentro de una funcion.
+    Rechaza retornos fuera de funciones y valores devueltos por funciones vacio.
+    Ademas verifica el tipo de retorno y lleva el conteo de retornos encontrados.
+*/
 static int validar_retorno(const NodoAST *n, EstadoSemantico *e)
 {
     if (!e->en_funcion) {
@@ -535,6 +671,10 @@ static int validar_retorno(const NodoAST *n, EstadoSemantico *e)
 
 /* Procesamos hermanos uno por uno para conservar el orden del programa. */
 static int recorrer_nodo(const NodoAST *n, EstadoSemantico *e);
+/*
+    Recorre en orden los nodos hermanos del AST y valida cada uno de ellos.
+    Acumula los errores que devuelve recorrer_nodo, respetando el orden del programa.
+*/
 static int recorrer_hermanos(const NodoAST *n, EstadoSemantico *e)
 {
     int errores = 0;
@@ -542,6 +682,12 @@ static int recorrer_hermanos(const NodoAST *n, EstadoSemantico *e)
     return errores;
 }
 
+/*
+    Prepara el contexto semantico de una funcion o del bloque principal.
+    Determina su nombre y tipo de retorno, revisa los parametros y recorre el cuerpo.
+    Comprueba si una funcion no vacia contiene al menos una sentencia devuelva.
+    Al finalizar, restaura el contexto de funcion y ciclos anterior.
+*/
 static int recorrer_funcion(const NodoAST *n, EstadoSemantico *e)
 {
     const Simbolo *fn = NULL;
@@ -583,6 +729,10 @@ static int recorrer_funcion(const NodoAST *n, EstadoSemantico *e)
     if (n->tipo == AST_FUNCION)
         errores += recorrer_nodo(hijo_n(n, 1), e); /* Firma y dimensiones. */
     errores += recorrer_nodo(cuerpo, e);
+    /*
+        Las funciones con retorno deben tener al menos un devuelva.
+        Esta comprobacion cuenta sentencias de retorno, no verifica todos los caminos posibles.
+    */
     if (n->tipo == AST_FUNCION && tipo != TIPO_VACIO &&
         tipo != TIPO_DESCONOCIDO && !e->retornos_encontrados) {
         fprintf(stderr,
@@ -598,6 +748,11 @@ static int recorrer_funcion(const NodoAST *n, EstadoSemantico *e)
     return errores;
 }
 
+/*
+    Realiza el recorrido principal del AST y ejecuta la validacion correspondiente a cada nodo.
+    Procesa declaraciones, expresiones, asignaciones, llamadas, retornos y estructuras de control.
+    Mantiene el orden de las declaraciones y la profundidad de ciclos para validar rompa.
+*/
 static int recorrer_nodo(const NodoAST *n, EstadoSemantico *e)
 {
     if (!n) return 0;
@@ -618,6 +773,10 @@ static int recorrer_nodo(const NodoAST *n, EstadoSemantico *e)
         return errores + recorrer_hermanos(id ? id->siguiente : NULL, e);
     }
 
+    /*
+        Primero se comprueban inicializadores y dimensiones, y despues se registra
+        la variable como declarada para evitar autorreferencias antes de tiempo.
+    */
     if (n->tipo == AST_DECLARACION || n->tipo == AST_DECL_LISTA ||
         n->tipo == AST_DECL_MATRIZ) {
         /* La inicializacion/dimensiones se analizan ANTES de registrar
@@ -677,6 +836,10 @@ static int recorrer_nodo(const NodoAST *n, EstadoSemantico *e)
         break;
     }
 
+    /*
+        En para se analiza la inicializacion antes de la condicion, el incremento
+        y el cuerpo. La profundidad del ciclo habilita la sentencia rompa.
+    */
     if (n->tipo == AST_FOR) {
         /* AST_FOR: inicio -> condicion -> incremento -> cuerpo.
            Inicio debe procesarse antes de condicion e incremento. */
@@ -698,6 +861,9 @@ static int recorrer_nodo(const NodoAST *n, EstadoSemantico *e)
         e->profundidad_bucle--;
         return errores;
     }
+    /*
+        En mientras se revisa la condicion y luego su cuerpo dentro de un ciclo activo.
+    */
     if (n->tipo == AST_WHILE) {
         errores += recorrer_nodo(hijo_n(n, 0), e);
         e->profundidad_bucle++;
@@ -705,6 +871,10 @@ static int recorrer_nodo(const NodoAST *n, EstadoSemantico *e)
         e->profundidad_bucle--;
         return errores;
     }
+    /*
+        Las ramas de si se revisan por separado para no confundir los hijos del nodo
+        con una lista general de sentencias hermanas.
+    */
     if (n->tipo == AST_IF) {
         /* No recorrer los hermanos del nodo de condicion como si fueran
            una lista; cada hijo representa una rama de la estructura. */
@@ -716,6 +886,12 @@ static int recorrer_nodo(const NodoAST *n, EstadoSemantico *e)
     return errores + recorrer_hermanos(n->hijo, e);
 }
 
+/*
+    Punto de entrada de la fase de analisis semantico del compilador.
+    Recibe el AST, la tabla de simbolos y el mecanismo para recuperar ambitos de identificadores.
+    Inicializa el estado, reserva las marcas de declaraciones y recorre el programa.
+    Libera la memoria temporal y devuelve la cantidad de errores detectados.
+*/
 int semantico_analizar(const NodoAST *raiz, const TablaSimbolos *tabla,
                       SemanticoResolverAmbito resolver, void *contexto)
 {
@@ -733,6 +909,10 @@ int semantico_analizar(const NodoAST *raiz, const TablaSimbolos *tabla,
         fprintf(stderr, "Error: sin memoria para analisis semantico.\n");
         return 1;
     }
+    /*
+        Se realiza el analisis completo del programa y despues se liberan
+        las marcas temporales utilizadas para comprobar declaraciones previas.
+    */
     int errores = recorrer_hermanos(raiz, &e);
     free(e.declarados);
     return errores;

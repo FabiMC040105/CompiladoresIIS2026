@@ -1,3 +1,8 @@
+/*
+    Incluye las estructuras y funciones de la tabla de simbolos, junto con las bibliotecas
+    necesarias para reservar memoria, trabajar con cadenas y controlar los limites numericos.
+    memoria.h contiene los limites usados al asignar direcciones de memoria.
+*/
 #include "tabla_simbolos.h"
 
 #include <stdlib.h>
@@ -30,6 +35,10 @@ static char *ts_copiar_cadena(const char *texto)
     return copia;
 }
 
+/*
+    Comprueba que una cadena exista y que no este vacia.
+    Se utiliza para validar nombres de simbolos, ambitos y dimensiones.
+*/
 static int ts_cadena_valida(const char *texto)
 {
     return texto != NULL && texto[0] != '\0';
@@ -54,6 +63,7 @@ static Ambito *ts_crear_ambito_interno(
         return NULL;
     }
 
+    /* Asigna un identificador unico y guarda la relacion con el ambito padre. */
     ambito->id = tabla->siguiente_id_ambito++;
     ambito->tipo = tipo;
     ambito->padre = padre;
@@ -67,6 +77,11 @@ static Ambito *ts_crear_ambito_interno(
     return ambito;
 }
 
+/*
+    Crea la tabla de simbolos e inicializa el ambito Global.
+    Reserva memoria para la tabla y establece Global como ambito actual,
+    de forma que las primeras declaraciones se registren en ese contexto.
+*/
 TablaSimbolos *ts_crear(void)
 {
     TablaSimbolos *tabla = calloc(1, sizeof(*tabla));
@@ -83,10 +98,16 @@ TablaSimbolos *ts_crear(void)
         return NULL;
     }
 
+    /* El ambito Global sera el punto de partida para las declaraciones. */
     tabla->ambito_actual = tabla->ambito_global;
     return tabla;
 }
 
+/*
+    Libera toda la memoria utilizada por la tabla de simbolos.
+    Recorre las listas enlazadas de simbolos y ambitos, libera sus nombres,
+    dimensiones y listas de parametros, y finalmente libera la tabla principal.
+*/
 void ts_destruir(TablaSimbolos *tabla)
 {
     Simbolo *simbolo;
@@ -128,6 +149,11 @@ void ts_destruir(TablaSimbolos *tabla)
     free(tabla);
 }
 
+/*
+    Abre un nuevo ambito utilizando el ambito actual como padre.
+    Verifica que el nombre y el tipo sean validos, crea el ambito y
+    actualiza ambito_actual para registrar las siguientes declaraciones.
+*/
 Ambito *ts_entrar_ambito(TablaSimbolos *tabla,
                          const char *nombre,
                          TipoAmbito tipo)
@@ -147,6 +173,10 @@ Ambito *ts_entrar_ambito(TablaSimbolos *tabla,
     return nuevo;
 }
 
+/*
+    Cierra el ambito activo regresando a su ambito padre.
+    Impide salir cuando no existe un ambito superior, como sucede en Global.
+*/
 ResultadoTS ts_salir_ambito(TablaSimbolos *tabla)
 {
     if (tabla == NULL || tabla->ambito_actual == NULL ||
@@ -157,6 +187,11 @@ ResultadoTS ts_salir_ambito(TablaSimbolos *tabla)
     return TS_OK;
 }
 
+/*
+    Busca un simbolo por nombre solamente dentro del ambito indicado.
+    Recorre la lista general de simbolos y compara el nombre y el ambito,
+    retornando NULL si no encuentra una coincidencia.
+*/
 Simbolo *ts_buscar_local(const TablaSimbolos *tabla,
                          const char *nombre,
                          const Ambito *ambito)
@@ -175,6 +210,11 @@ Simbolo *ts_buscar_local(const TablaSimbolos *tabla,
     return NULL;
 }
 
+/*
+    Busca un simbolo visible desde el ambito actual.
+    Primero revisa el ambito donde se encuentra el parser y luego recorre
+    los ambitos padres hasta Global, permitiendo resolver variables externas.
+*/
 Simbolo *ts_buscar_visible(const TablaSimbolos *tabla, const char *nombre)
 {
     const Ambito *ambito;
@@ -192,6 +232,12 @@ Simbolo *ts_buscar_visible(const TablaSimbolos *tabla, const char *nombre)
     return NULL;
 }
 
+/*
+    Inserta una nueva variable, parametro, funcion o etiqueta en la tabla de simbolos.
+    Valida los argumentos y comprueba que el nombre no este repetido en el mismo ambito.
+    Reserva memoria, registra el tipo, forma, linea y ambito, y enlaza el nuevo simbolo.
+    La direccion de memoria se asigna posteriormente durante la distribucion de memoria.
+*/
 ResultadoTS ts_insertar(TablaSimbolos *tabla,
                         const char *nombre,
                         CategoriaSimbolo categoria,
@@ -212,6 +258,7 @@ ResultadoTS ts_insertar(TablaSimbolos *tabla,
         forma < FORMA_ESCALAR || forma > FORMA_MATRIZ || linea < 0)
         return TS_ERROR_ARGUMENTO;
 
+    /* Un nombre puede repetirse en otro ambito, pero no dentro del mismo. */
     if (ts_buscar_local(tabla, nombre, tabla->ambito_actual) != NULL)
         return TS_ERROR_DUPLICADO;
 
@@ -231,6 +278,7 @@ ResultadoTS ts_insertar(TablaSimbolos *tabla,
         return TS_ERROR_MEMORIA;
     }
 
+    /* Guarda las propiedades semanticas del simbolo y el ambito de declaracion. */
     simbolo->id = tabla->siguiente_id_simbolo++;
     simbolo->categoria = categoria;
     simbolo->tipo = tipo;
@@ -252,6 +300,11 @@ ResultadoTS ts_insertar(TablaSimbolos *tabla,
     return TS_OK;
 }
 
+/*
+    Almacena las dimensiones de un simbolo que representa una lista o matriz.
+    Verifica la cantidad de dimensiones segun la forma del simbolo y copia
+    sus valores para conservarlos independientemente de las cadenas originales.
+*/
 ResultadoTS ts_definir_dimensiones(Simbolo *simbolo,
                                   const char *dimension1,
                                   const char *dimension2)
@@ -270,6 +323,7 @@ ResultadoTS ts_definir_dimensiones(Simbolo *simbolo,
     if (simbolo->forma == FORMA_MATRIZ && !ts_cadena_valida(dimension2))
         return TS_ERROR_ARGUMENTO;
 
+    /* Se preparan copias nuevas antes de reemplazar las dimensiones existentes. */
     primera = ts_copiar_cadena(dimension1);
     if (primera == NULL)
         return TS_ERROR_MEMORIA;
@@ -315,6 +369,7 @@ static int ts_leer_dimension_positiva(
         texto[0] == '\n')
         return 0;
 
+    /* Reinicia errno para detectar correctamente un desbordamiento de strtoull. */
     errno = 0;
     numero = strtoull(texto, &fin, 10);
 
@@ -346,6 +401,7 @@ static int ts_calcular_bytes_simbolo(
     if (simbolo == NULL || bytes == NULL)
         return 0;
 
+    /* Determina cuantos elementos ocupa el simbolo segun su forma. */
     switch (simbolo->forma)
     {
         case FORMA_ESCALAR:
@@ -389,8 +445,12 @@ static int ts_calcular_bytes_simbolo(
 }
 
 /* Encuentra la funcion a la que pertenece un ambito.
- * Funciona tambien para ambitos anidados dentro de si, mientras y para.
- */
+   Funciona tambien para ambitos anidados dentro de si, mientras y para.
+
+    Recorre los ambitos padres para localizar la funcion propietaria de un bloque.
+    Permite asociar variables locales de si, mientras y para al marco de
+    la funcion correspondiente, aunque se encuentren en ambitos anidados.
+*/
 static Ambito *ts_funcion_propietaria(Ambito *ambito)
 {
     while (ambito != NULL && ambito->tipo != AMBITO_FUNCION)
@@ -422,6 +482,7 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
     Ambito *ambito_funcion;
     unsigned long long siguiente_global = 0;
 
+    /* Calcula el espacio de pila disponible y descuenta su cabecera reservada. */
     const unsigned long long CAPACIDAD_PILA =
         (unsigned long long)MEMORIA_TOTAL_BYTES - LIMITE_PILA;
 
@@ -526,6 +587,7 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
         Simbolo *simbolo;
         Simbolo *simbolo_funcion = NULL;
 
+        /* Los parametros empiezan despues de los 8 bytes de cabecera del marco. */
         unsigned long long siguiente_parametro = 8ULL;
         unsigned long long espacio_parametros = 0;
         unsigned long long espacio_local = 0;
@@ -647,6 +709,7 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
             if (espacio_local > (unsigned long long)LONG_MAX)
                 return TS_ERROR_MEMORIA;
 
+            /* Las variables locales crecen hacia direcciones negativas respecto al FP. */
             simbolo->direccion = -(long)espacio_local;
             simbolo->direccion_asignada = 1;
             simbolo->tamano_bytes = (long)bytes;
@@ -683,6 +746,11 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
 
     return TS_OK;
 }
+/*
+    Agrega un parametro a la firma de una funcion.
+    Verifica las categorias recibidas, evita repetir el mismo parametro
+    y lo enlaza al final para conservar el orden de declaracion.
+*/
 ResultadoTS ts_agregar_parametro(Simbolo *funcion, Simbolo *parametro)
 {
     ParametroFirma *nuevo;
@@ -717,10 +785,15 @@ ResultadoTS ts_agregar_parametro(Simbolo *funcion, Simbolo *parametro)
         actual->siguiente = nuevo;
     }
 
+    /* Actualiza la cantidad de elementos presentes en la firma de la funcion. */
     funcion->cantidad_parametros++;
     return TS_OK;
 }
 
+/*
+    Convierte el tipo de dato registrado en la tabla a su nombre de texto.
+    Se utiliza al imprimir los simbolos para mostrar entero, vof o vacio.
+*/
 static const char *ts_nombre_tipo(TipoDato tipo)
 {
     switch (tipo)
@@ -732,6 +805,10 @@ static const char *ts_nombre_tipo(TipoDato tipo)
     }
 }
 
+/*
+    Obtiene el nombre de la categoria de un simbolo para mostrarlo en la tabla.
+    Distingue entre variables, parametros, funciones y etiquetas.
+*/
 static const char *ts_nombre_categoria(CategoriaSimbolo categoria)
 {
     switch (categoria)
@@ -744,6 +821,10 @@ static const char *ts_nombre_categoria(CategoriaSimbolo categoria)
     }
 }
 
+/*
+    Convierte la forma de almacenamiento del simbolo a texto.
+    Permite distinguir un escalar, una lista y una matriz al imprimir la tabla.
+*/
 static const char *ts_nombre_forma(FormaSimbolo forma)
 {
     switch (forma)
@@ -755,6 +836,10 @@ static const char *ts_nombre_forma(FormaSimbolo forma)
     }
 }
 
+/*
+    Devuelve el nombre asociado al tipo de ambito.
+    Se utiliza para visualizar si un ambito es Global, funcion, bloque o for.
+*/
 static const char *ts_nombre_ambito(TipoAmbito tipo)
 {
     switch (tipo)
@@ -767,6 +852,11 @@ static const char *ts_nombre_ambito(TipoAmbito tipo)
     }
 }
 
+/*
+    Imprime la informacion de la tabla de simbolos en el flujo indicado.
+    Primero muestra el resumen de memoria de cada funcion y despues la lista
+    general con tipos, formas, ambitos, dimensiones y direcciones asignadas.
+*/
 void ts_imprimir(const TablaSimbolos *tabla, FILE *salida)
 {
     const Simbolo *actual;
@@ -886,6 +976,7 @@ void ts_imprimir(const TablaSimbolos *tabla, FILE *salida)
          actual != NULL;
          actual = actual->siguiente)
     {
+        /* Prepara los textos que se imprimiran para dimensiones y ubicacion en memoria. */
         char dimensiones[96] = "-";
         char ubicacion[96] = "sin asignar";
 
@@ -957,6 +1048,11 @@ void ts_imprimir(const TablaSimbolos *tabla, FILE *salida)
     fprintf(salida, "\n\n");
 }
 
+/*
+    Muestra los ambitos registrados y su relacion de jerarquia.
+    Recorre la lista de ambitos e imprime su identificador, nombre, tipo
+    y el identificador del ambito padre cuando existe.
+*/
 void ts_imprimir_ambitos(const TablaSimbolos *tabla, FILE *salida)
 {
     const Ambito *actual;

@@ -10,6 +10,11 @@
 
 #define MAX_LINEA_ASM 1024u
 
+/*
+    Representa una linea del ensamblador que se mantiene durante la Fase 5.
+    Guarda el texto original, el bundle que le corresponde y las posiciones
+    que se deben reemplazar si contiene una referencia a una etiqueta.
+*/
 typedef struct {
     char *texto;
     size_t inicio_referencia;
@@ -18,6 +23,11 @@ typedef struct {
     int tiene_referencia;
 } LineaASM;
 
+/*
+    Almacena las lineas leidas del ensamblador en un arreglo dinamico.
+    Cantidad y capacidad controlan la memoria reservada, mientras bundles
+    lleva el conteo de instrucciones VLIW reconocidas durante el recorrido.
+*/
 typedef struct {
     LineaASM *lineas;
     size_t cantidad;
@@ -25,6 +35,11 @@ typedef struct {
     size_t bundles;
 } ProgramaASM;
 
+/*
+    Crea una copia del texto recibido reservando memoria para la cadena.
+    Permite conservar cada linea original sin depender del buffer de lectura.
+    Devuelve la copia o NULL si no se pudo reservar memoria.
+*/
 static char *copiar_texto(const char *cadena)
 {
     size_t n = strlen(cadena) + 1u;
@@ -34,6 +49,11 @@ static char *copiar_texto(const char *cadena)
     return copia;
 }
 
+/*
+    Libera las cadenas guardadas y el arreglo de lineas del programa.
+    Al terminar reinicia la estructura para no conservar referencias a
+    memoria que ya fue liberada.
+*/
 static void liberar_programa(ProgramaASM *p)
 {
     size_t i;
@@ -43,6 +63,11 @@ static void liberar_programa(ProgramaASM *p)
     memset(p, 0, sizeof(*p));
 }
 
+/*
+    Agrega una linea al programa, aumentando la capacidad del arreglo
+    cuando es necesario. Copia el contenido de la linea y actualiza la
+    cantidad almacenada. Retorna 0 si ocurre un error de memoria.
+*/
 static int agregar_linea(ProgramaASM *p, const char *linea)
 {
     LineaASM *nuevo;
@@ -65,12 +90,21 @@ static int agregar_linea(ProgramaASM *p, const char *linea)
     return 1;
 }
 
+/*
+    Avanza el puntero para ignorar los espacios al inicio del texto.
+    Devuelve la posicion desde la que comienza el contenido util.
+*/
 static char *sin_espacios(char *p)
 {
     while (isspace((unsigned char)*p)) p++;
     return p;
 }
 
+/*
+    Verifica que un fragmento de texto pueda utilizarse como nombre de etiqueta.
+    Debe comenzar con una letra o guion bajo y continuar con letras,
+    numeros o guion bajo. El intervalo termina antes del puntero fin.
+*/
 static int es_nombre_valido(const char *inicio, const char *fin)
 {
     const char *p;
@@ -81,6 +115,11 @@ static int es_nombre_valido(const char *inicio, const char *fin)
     return 1;
 }
 
+/*
+    Comprueba si el operando ya contiene un valor numerico en lugar
+    de una etiqueta simbolica. Utiliza strtol y verifica que se haya
+    consumido todo el fragmento sin errores de rango.
+*/
 static int es_numero(const char *inicio, const char *fin)
 {
     char *termino;
@@ -92,6 +131,11 @@ static int es_numero(const char *inicio, const char *fin)
     return errno != ERANGE && termino == fin;
 }
 
+/*
+    Convierte los resultados de la tabla de etiquetas a mensajes de texto.
+    Se utiliza para explicar errores de nombres duplicados, referencias,
+    limites de memoria y offsets al procesar el ensamblador.
+*/
 static const char *nombre_error(ResultadoEtiquetas r)
 {
     switch (r) {
@@ -106,6 +150,12 @@ static const char *nombre_error(ResultadoEtiquetas r)
     }
 }
 
+/*
+    ANALISIS DE LINEAS Y REFERENCIAS DEL ENSAMBLADOR
+    Esta funcion reconoce etiquetas, instrucciones y saltos simbolicos.
+    Tambien asigna a cada instruccion su indice de bundle para calcular
+    despues las direcciones relativas de salto.
+*/
 /* Devuelve 1 si la linea tiene un bundle; 0 si es comentario/etiqueta.
    En caso de error, retorna -1. */
 static int analizar_linea(ProgramaASM *p, TablaEtiquetas *tabla,
@@ -122,6 +172,10 @@ static int analizar_linea(ProgramaASM *p, TablaEtiquetas *tabla,
     char nombre[MAX_LINEA_ASM];
     int rd, rs;
 
+/*
+    Quita los espacios finales para identificar correctamente lineas
+    vacias, comentarios y definiciones de etiquetas.
+*/
     while (fin > pos && isspace((unsigned char)fin[-1])) fin--;
     if (fin == pos || *pos == '#') return 0;
 
@@ -146,6 +200,11 @@ static int analizar_linea(ProgramaASM *p, TablaEtiquetas *tabla,
         return 0;
     }
 
+/*
+    Asocia la instruccion con el bundle actual y analiza su unidad funcional.
+    BRU puede contener saltos; en ALU se revisa ADDI cuando utiliza x1
+    como registro base para construir una direccion de retorno.
+*/
     linea->bundle = p->bundles;
     if (strncmp(pos, "BRU:", 4) == 0) {
         char *instruccion = sin_espacios(pos + 4);
@@ -186,6 +245,11 @@ static int analizar_linea(ProgramaASM *p, TablaEtiquetas *tabla,
         goto formato_invalido;
     }
 
+/*
+    Ubica el operando final y revisa si es una direccion numerica o un
+    nombre simbolico. Si es una etiqueta, registra la referencia y guarda
+    el tramo de texto que sera sustituido por el offset calculado.
+*/
     termino = operando;
     while (termino < fin && !isspace((unsigned char)*termino)) termino++;
     if (operando == termino ||
@@ -206,6 +270,10 @@ static int analizar_linea(ProgramaASM *p, TablaEtiquetas *tabla,
         linea->fin_referencia = (size_t)(termino - original);
     }
 
+/*
+    Una instruccion valida ocupa un bundle de 16 bytes. El contador
+    se incrementa aun cuando no exista una referencia simbolica.
+*/
 bundle_valido:
     if (p->bundles >= ETQ_MAX_BUNDLES) {
         fprintf(errores, "Fase 5, linea %zu: se superaron los %u bundles de memoria\n",
@@ -215,12 +283,23 @@ bundle_valido:
     p->bundles++;
     return 1;
 
+/*
+    Reporta las lineas que no cumplen el formato de ensamblador
+    esperado para esta fase, indicando su numero y contenido.
+*/
 formato_invalido:
     fprintf(errores, "Fase 5, linea %zu: formato no reconocido: %s", numero, original);
     if (largo && original[strlen(original)-1] != '\n') fputc('\n', errores);
     return -1;
 }
 
+/*
+    RESOLUCION DE ETIQUETAS - FASE 5
+    Lee el ensamblador con etiquetas, registra sus posiciones y resuelve
+    los destinos de saltos en offsets relativos medidos en bytes.
+    Finalmente escribe otro archivo ASM con las referencias reemplazadas,
+    conservando las demas lineas y comentarios del archivo original.
+*/
 int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *reporte)
 {
     FILE *in = NULL;
@@ -234,6 +313,10 @@ int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *report
     int salida_creada = 0;
     ResultadoEtiquetas r;
 
+/*
+    Valida las rutas para evitar reemplazar el archivo de entrada
+    con el resultado de la resolucion.
+*/
     if (entrada == NULL || salida == NULL || strcmp(entrada, salida) == 0) {
         fprintf(err, "Fase 5: entrada y salida deben ser rutas diferentes\n");
         return 0;
@@ -245,9 +328,18 @@ int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *report
         fprintf(err, "Fase 5: no se pudo abrir %s\n", entrada);
         return 0;
     }
+/*
+    Crea la tabla temporal donde se almacenan etiquetas definidas
+    y referencias a saltos encontradas durante la lectura.
+*/
     tabla = etq_crear();
     if (tabla == NULL) goto limpieza;
 
+/*
+    Primera pasada: lee las lineas de entrada en orden, conserva el
+    contenido original y registra la posicion de cada etiqueta y salto.
+    Tambien detecta lineas que superan el tamano maximo permitido.
+*/
     while (fgets(buffer, sizeof(buffer), in)) {
         LineaASM *actual;
         n = strlen(buffer);
@@ -262,7 +354,17 @@ int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *report
     }
     if (ferror(in)) goto limpieza;
 
+/*
+    Calcula los offsets de todas las referencias una vez que se conocen
+    todos los bundles y sus etiquetas. Cada offset es relativo al bundle
+    de origen y debe respetar el rango de la instruccion del ISA.
+*/
     r = etq_resolver(tabla, programa.bundles);
+/*
+    Si la resolucion falla, muestra las referencias problematicas.
+    En particular indica destinos inexistentes y saltos cuyo offset
+    supera el rango admitido por la arquitectura.
+*/
     if (r != ETQ_OK) {
         const ReferenciaSalto *ref;
         fprintf(err, "Fase 5: %s\n", nombre_error(r));
@@ -285,6 +387,10 @@ int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *report
         goto limpieza;
     }
 
+/*
+    Solo se crea el archivo de salida cuando todas las etiquetas
+    fueron verificadas y sus offsets quedaron resueltos.
+*/
     out = fopen(salida, "w");
     if (out != NULL) salida_creada = 1;
     if (out == NULL) {
@@ -292,6 +398,11 @@ int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *report
         goto limpieza;
     }
 
+/*
+    Segunda pasada: vuelve a escribir las lineas del programa.
+    Para una referencia simbolica sustituye solo el nombre de la etiqueta
+    por el desplazamiento numerico, sin modificar el resto de la linea.
+*/
     for (i = 0; i < programa.cantidad; i++) {
         LineaASM *linea = &programa.lineas[i];
         if (linea->tiene_referencia) {
@@ -309,12 +420,21 @@ int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *report
     if (fclose(out) != 0) { out = NULL; goto limpieza; }
     out = NULL;
     bien = 1;
+/*
+    Cuando se solicita un reporte, imprime la cantidad de bundles
+    resueltos y el contenido de la tabla de etiquetas y referencias.
+*/
     if (reporte != NULL) {
         fprintf(reporte, "Fase 5: %zu bundles resueltos correctamente\n",
                 programa.bundles);
         etq_imprimir(tabla, reporte);
     }
 
+/*
+    Se ejecuta tanto al completar el proceso como al encontrar errores.
+    Cierra archivos, elimina una salida incompleta y libera la memoria
+    utilizada por el programa y su tabla de etiquetas.
+*/
 limpieza:
     if (out != NULL) fclose(out);
     if (!bien && salida_creada) remove(salida);

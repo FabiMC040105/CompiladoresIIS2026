@@ -656,46 +656,37 @@ static NodoAST *ast_crear_parametros(NodoAST *lista)
 }
 %}
 
+/*
+Configuracion de Bison para construir el parser.
+ielr permite generar el analizador con las reglas definidas,
+parse.error verbose muestra errores mas detallados y api.value.type
+hace que los valores semanticos sean punteros a nodos del AST.
+*/
 %define lr.type ielr
 %define parse.error verbose
 %define api.value.type {NodoAST *}
-
-/* Palabras reservadas */
 %token SI SINO SINOSI MIENTRAS PARA DEVUELVA DEFINA ROMPA PRINCIPAL
-
-/* Tipos y estructuras */
 %token LISTA MATRIZ VOF ENTERO VACIO
-
-/* Operadores */
 %token POTENCIA IGUALDAD DIFERENTE MENOR_IGUAL MAYOR_IGUAL AND OR
-
-/* Valores booleanos */
 %token VERDADERO FALSO
-
-/* Identificadores y números */
 %token NUMERO IDENTIFICADOR
-
-/* Importaciones */
 %token TRAIGASE EXTENSION_E
-
-/* Otros tokens */
 %token ERROR_LEXICO FIN_LINEA
 
-/*
- * Los siguientes tokens crean nodos en lexer.l.
- * Solo se les aplica destructor a esos tokens con valores
- * semánticos propios.
- */
+    /*
+    Los siguientes tokens crean nodos en lexer.l.
+    Solo se les aplica destructor a esos tokens con valores
+    semánticos propios.
+    */
 %destructor { ast_liberar($$); } NUMERO IDENTIFICADOR VERDADERO FALSO
 
-/*
- * Estos no terminales pueden contener nodos AST.
- * Si Bison los descarta durante la recuperación de un error,
- * se libera el árbol que posean.
- *
- * Programa se excluye porque su valor se conserva en raiz
- * cuando el análisis termina correctamente.
- */
+    /*
+    Estos no terminales pueden contener nodos AST.
+    Si Bison los descarta durante la recuperación de un error,
+    se libera el árbol que posean.
+    Programa se excluye porque su valor se conserva en raiz
+    cuando el análisis termina correctamente.
+    */
 %destructor { ast_liberar($$); }
     Importaciones
     Importacion
@@ -743,7 +734,9 @@ static NodoAST *ast_crear_parametros(NodoAST *lista)
     Unario
     Primario
 
+/*---------------------------------REGLAS DE LA GRAMATICA Y CONSTRUCCION DEL AST---------------------------------*/
 %%
+
 
 /* Programa completo */
 Programa
@@ -758,6 +751,7 @@ Programa
           $$ = raiz;
       }
     ;
+
 
 /* Importaciones */
 Importaciones
@@ -792,6 +786,7 @@ Globales
       }
     ;
 
+
 /* Funciones y principal */
 Unidades
     : DEFINA RestoDefinicion
@@ -803,6 +798,7 @@ Unidades
           $$ = NULL;
       }
     ;
+
 
 RestoDefinicion
     : ENTERO FirmaFuncion Unidades
@@ -821,6 +817,7 @@ RestoDefinicion
       }
     ;
 
+
 FirmaFuncion
     : IDENTIFICADOR '(' Parametros ')' Bloque FIN_LINEA
       {
@@ -834,6 +831,7 @@ FirmaFuncion
           ast_agregar_hijo($$, $5);
       }
     ;
+
 
 RestoVacio
     : IDENTIFICADOR '(' Parametros ')' Bloque FIN_LINEA Unidades
@@ -859,6 +857,7 @@ RestoVacio
       }
     ;
 
+
 /* Parámetros */
 Parametros
     : Parametro ParametrosResto
@@ -871,6 +870,7 @@ Parametros
       }
     ;
 
+
 ParametrosResto
     : ',' Parametro ParametrosResto
       {
@@ -881,6 +881,7 @@ ParametrosResto
           $$ = NULL;
       }
     ;
+
 
 Parametro
     : ENTERO IDENTIFICADOR
@@ -922,6 +923,7 @@ Parametro
       }
     ;
 
+
 /* Dimensiones de listas y matrices */
 Dimension
     : NUMERO
@@ -934,6 +936,7 @@ Dimension
       }
     ;
 
+
 /* Bloques de código */
 Bloque
     : '{' Sentencias '}'
@@ -942,6 +945,7 @@ Bloque
           ast_agregar_hijo($$, $2);
       }
     ;
+
 
 Sentencias
     : Sentencia Sentencias
@@ -953,6 +957,7 @@ Sentencias
           $$ = NULL;
       }
     ;
+
 
 /* Sentencias del lenguaje */
 Sentencia
@@ -989,6 +994,7 @@ Sentencia
           $$ = $1;
       }
     ;
+
 
 /* Declaraciones de variables */
 Declaracion
@@ -1039,6 +1045,7 @@ Declaracion
       }
     ;
 
+
 /* Valor inicial de una variable */
 Inicializacion
     : '=' Expresion
@@ -1050,6 +1057,7 @@ Inicializacion
           $$ = NULL;
       }
     ;
+
 
 Inicializadorlista
     : '=' '[' Elementos ']'
@@ -1063,6 +1071,7 @@ Inicializadorlista
       }
     ;
 
+
 Inicializadormatriz
     : '=' '[' Filas ']'
       {
@@ -1074,6 +1083,7 @@ Inicializadormatriz
           $$ = NULL;
       }
     ;
+
 
 /* Filas y elementos de listas y matrices */
 Filas
@@ -1124,6 +1134,7 @@ RestoElementos
       }
     ;
 
+
 /* Asignaciones */
 Asignacion
     : Destino '=' Expresion
@@ -1138,6 +1149,7 @@ Destino
           $$ = $1;
       }
     ;
+
 
 /* Acceso a variables, listas y matrices */
 Acceso
@@ -1162,6 +1174,7 @@ Acceso
       }
     ;
 
+
 /* Condicionales */
 If
     : SI '(' Expresion ')' Bloque Continuacionif
@@ -1173,6 +1186,7 @@ If
           ast_agregar_hijo($$, $6);
       }
     ;
+
 
 Continuacionif
     : FIN_LINEA
@@ -1193,6 +1207,7 @@ Continuacionif
       }
     ;
 
+
 /* Ciclo mientras */
 While
     : MIENTRAS '(' Expresion ')' Bloque FIN_LINEA
@@ -1203,6 +1218,7 @@ While
           ast_agregar_hijo($$, $5);
       }
     ;
+
 
 /* Ciclo para */
 For
@@ -1216,6 +1232,7 @@ For
           ast_agregar_hijo($$, $9);
       }
     ;
+
 
 InicioFor
     : Asignacion
@@ -1252,6 +1269,7 @@ Break
       }
     ;
 
+
 /* Llamadas a funciones */
 Llamada
     : IDENTIFICADOR '(' Argumentos ')'
@@ -1262,6 +1280,7 @@ Llamada
           ast_agregar_hijo($$, $3);
       }
     ;
+
 
 Argumentos
     : Expresion RestoArgumentos
@@ -1285,6 +1304,7 @@ RestoArgumentos
       }
     ;
 
+
 /* Expresiones lógicas */
 Expresion
     : Expresion OR ExprAnd
@@ -1297,6 +1317,7 @@ Expresion
       }
     ;
 
+
 ExprAnd
     : ExprAnd AND ExprComp
       {
@@ -1307,6 +1328,7 @@ ExprAnd
           $$ = $1;
       }
     ;
+
 
 /* Comparaciones */
 ExprComp
@@ -1320,6 +1342,7 @@ ExprComp
           $$ = $1;
       }
     ;
+
 
 Comparador
     : IGUALDAD
@@ -1348,6 +1371,7 @@ Comparador
       }
     ;
 
+
 /* Operaciones aritméticas */
 ExprArit
     : ExprArit '+' Termino
@@ -1363,6 +1387,7 @@ ExprArit
           $$ = $1;
       }
     ;
+
 
 Termino
     : Termino '*' Potencia
@@ -1383,6 +1408,7 @@ Termino
       }
     ;
 
+
 Potencia
     : Unario POTENCIA Potencia
       {
@@ -1394,6 +1420,7 @@ Potencia
       }
     ;
 
+
 Unario
     : '-' Unario
       {
@@ -1404,6 +1431,7 @@ Unario
           $$ = $1;
       }
     ;
+
 
 /* Valores, variables, llamadas y expresiones entre paréntesis */
 Primario
@@ -1433,8 +1461,18 @@ Primario
       }
     ;
 
+/*---------------------------------FUNCIONES AUXILIARES Y EJECUCION DEL COMPILADOR---------------------------------*/
+
+/*
+Termina la definicion de la gramatica. A partir de aqui se incluyen
+las funciones en C para procesar opciones y ejecutar las fases.
+*/
 %%
 
+    /*
+    Recibe los errores detectados por Bison e imprime el numero
+    de linea del archivo fuente junto con la descripcion del error.
+    */
 void yyerror(const char *s)
 {
     fprintf(stderr,
@@ -1443,6 +1481,10 @@ void yyerror(const char *s)
             s);
 }
 
+    /*
+    Muestra la sintaxis de uso de cdff y explica las opciones de
+    compilacion disponibles cuando se solicita ayuda o faltan datos.
+    */
 static void mostrar_uso(FILE *f)
 {
     fprintf(f,
@@ -1460,6 +1502,11 @@ static void mostrar_uso(FILE *f)
         "  -h, --help      Muestra esta ayuda.\n");
 }
 
+    /*
+    Construye una ruta de salida a partir del archivo de entrada.
+    Retira su extension cuando corresponde y agrega la nueva,
+    respetando la capacidad del arreglo y separadores de ruta.
+    */
 static int construir_ruta_con_extension(const char *entrada,
                                          const char *extension,
                                          char *salida,
@@ -1493,11 +1540,20 @@ static int construir_ruta_con_extension(const char *entrada,
     return 1;
 }
 
+    /*
+    Copia una ruta al arreglo destino comprobando que no exceda
+    el espacio disponible para el nombre del archivo.
+    */
 static int copiar_ruta(const char *origen, char *destino, size_t capacidad)
 {
     return snprintf(destino, capacidad, "%s", origen) < (int)capacidad;
 }
 
+    /*
+    Funcion principal del compilador. Procesa las opciones recibidas,
+    prepara los archivos de salida y ejecuta las fases desde el source
+    .e hasta la generacion de bundles VLIW en codigo maquina.
+    */
 int main(int argc, char *argv[])
 {
     int resultado;
@@ -1561,6 +1617,11 @@ int main(int argc, char *argv[])
         }
     }
 
+    /*
+    Cuando se utiliza -x, cdff recibe directamente un archivo .asm.
+    En ese modo no ejecuta el lexer, parser ni semantico y genera
+    el archivo .bin mediante el ensamblador integrado.
+    */
     if (opcion_ensamblar)
     {
         if (archivo_fuente != NULL) {
@@ -1591,12 +1652,21 @@ int main(int argc, char *argv[])
                ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
+    /*
+    Si no se utiliza -x debe recibirse un archivo fuente .e.
+    Cuando falta, se imprime el modo de uso y termina la ejecucion.
+    */
     if (archivo_fuente == NULL)
     {
         mostrar_uso(stderr);
         return EXIT_FAILURE;
     }
 
+    /*
+    Prepara las rutas de los tres archivos de ensamblador:
+    intermedio, resuelto y final. Cada uno corresponde a una
+    etapa distinta de la traduccion a codigo maquina.
+    */
     if (!construir_ruta_con_extension(
             archivo_fuente, ".intermedio.asm",
             ruta_asm_intermedia, sizeof(ruta_asm_intermedia)) ||
@@ -1621,6 +1691,10 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+    /*
+    Comprueba que el archivo binario tenga una ruta distinta
+    a los archivos de ensamblador para no sobreescribirlos.
+    */
     if (strcmp(ruta_asm, ruta_bin) == 0 ||
         strcmp(ruta_asm_intermedia, ruta_bin) == 0 ||
         strcmp(ruta_asm_resuelta, ruta_bin) == 0)
@@ -1629,6 +1703,10 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
+    /*
+    Abre el programa fuente y entrega su flujo a yyin, utilizado
+    por el lexer para comenzar a reconocer los tokens.
+    */
     entrada = fopen(archivo_fuente, "r");
     if (entrada == NULL)
     {
@@ -1637,6 +1715,11 @@ int main(int argc, char *argv[])
     }
     yyin = entrada;
 
+    /*
+    Crea la tabla de simbolos antes de iniciar yyparse.
+    El lexer y las acciones de Bison la utilizan para registrar
+    funciones, parametros, variables y ambitos durante el analisis.
+    */
     tabla = ts_crear();
     if (tabla == NULL)
     {
@@ -1648,6 +1731,11 @@ int main(int argc, char *argv[])
     if (opcion_verbose)
         printf("[FASES 1-2] Analisis lexico, sintactico y construccion del AST...\n");
 
+    /*
+    Ejecuta el reconocimiento lexico y sintactico del source.
+    Durante las reducciones se construye el AST y se registran
+    las declaraciones; despues se cierra el archivo de entrada.
+    */
     resultado = yyparse();
     fclose(entrada);
     entrada = NULL;
@@ -1660,6 +1748,10 @@ int main(int argc, char *argv[])
         if (opcion_verbose)
             printf("[FASE 3] Asignando memoria y ejecutando analisis semantico...\n");
 
+    /*
+    Asigna las direcciones de memoria de las variables globales
+    antes de ejecutar las comprobaciones semanticas del programa.
+    */
         if (ts_asignar_direcciones_globales(tabla) != TS_OK)
         {
             fprintf(stderr,
@@ -1667,6 +1759,10 @@ int main(int argc, char *argv[])
             goto error_compilacion;
         }
 
+    /*
+    Cuando se construyo un AST valido se pueden imprimir sus nodos
+    si se solicito -t y continuar con las verificaciones semanticas.
+    */
         if (raiz != NULL)
         {
             if (opcion_ast)
@@ -1676,6 +1772,11 @@ int main(int argc, char *argv[])
                 ast_imprimir(raiz, 0);
             }
 
+    /*
+    Revisa el arbol usando la tabla de simbolos y las marcas de ambito.
+    Acumula los errores encontrados para evitar generar ensamblador
+    cuando el programa tiene problemas semanticos.
+    */
             errores_semanticos += semantico_analizar(
                 raiz,
                 tabla,
@@ -1692,8 +1793,17 @@ int main(int argc, char *argv[])
                            errores_semanticos);
             }
 
+    /*
+    Las fases de generacion de codigo solo se ejecutan si el
+    analisis semantico termino sin errores.
+    */
             if (errores_semanticos == 0)
             {
+    /*
+    Configura la comunicacion del generador de codigo con la tabla
+    de simbolos. Permite resolver referencias a identificadores del AST
+    y consultar el ambito en el cual fue reconocido cada uno.
+    */
                 CodegenTablaContexto contexto_codegen;
                 CodegenConfig config_codegen = {0};
 
@@ -1709,6 +1819,10 @@ int main(int argc, char *argv[])
                 if (opcion_verbose)
                     printf("[FASE 4] Generando ensamblador y calendarizando dependencias...\n");
 
+    /*
+    FASE 4: traduce el AST a ensamblador intermedio y aplica la
+    calendarizacion de dependencias para el procesador VLIW.
+    */
                 if (!codegen_generar_archivo(
                         raiz, ruta_asm_intermedia, &config_codegen))
                 {
@@ -1720,6 +1834,10 @@ int main(int argc, char *argv[])
                 if (opcion_verbose)
                     printf("[FASE 5] Resolviendo etiquetas y offsets...\n");
 
+    /*
+    FASE 5: sustituye las etiquetas del ensamblador intermedio
+    por los offsets necesarios para las instrucciones de salto.
+    */
                 if (!resolver_etiquetas_asm(
                         ruta_asm_intermedia,
                         ruta_asm_resuelta,
@@ -1733,6 +1851,11 @@ int main(int argc, char *argv[])
                 if (opcion_verbose)
                     printf("[FASE 5.5] Empaquetando operaciones independientes en bundles VLIW...\n");
 
+    /*
+    FASE 5.5: revisa las instrucciones del ensamblador resuelto
+    y agrupa operaciones independientes dentro de los distintos
+    slots de un mismo bundle VLIW antes de generar el .bin.
+    */
                 if (!vliw_empaquetar_archivo(
                         ruta_asm_resuelta,
                         ruta_asm,
@@ -1746,6 +1869,10 @@ int main(int argc, char *argv[])
                 if (opcion_verbose)
                     printf("[FASE 6] Generando codigo maquina...\n");
 
+    /*
+    FASE 6: transforma los paquetes del ensamblador final en
+    la codificacion de codigo maquina definida por la ISA.
+    */
                 if (!binario_ensamblar_archivo(
                         ruta_asm,
                         ruta_bin,
@@ -1757,6 +1884,10 @@ int main(int argc, char *argv[])
                     goto error_compilacion;
                 }
 
+    /*
+    Al terminar la generacion se eliminan los archivos intermedios.
+    El ensamblador final solo se conserva si se solicito la opcion -s.
+    */
                 remove(ruta_asm_intermedia);
                 remove(ruta_asm_resuelta);
 
@@ -1766,10 +1897,18 @@ int main(int argc, char *argv[])
                     printf("Ensamblador conservado: %s\n", ruta_asm);
             }
 
+    /*
+    Libera la memoria reservada para el AST despues de utilizarlo
+    en las fases semanticas y de generacion de codigo.
+    */
             ast_liberar(raiz);
             raiz = NULL;
         }
 
+    /*
+    Con la opcion -m se muestran la tabla de simbolos, los ambitos
+    y las firmas de funciones que se construyeron para el source.
+    */
         if (opcion_simbolos)
         {
             printf("\nTabla de simbolos:\n");
@@ -1786,6 +1925,10 @@ int main(int argc, char *argv[])
             fprintf(stderr, "\nSe encontraron %d errores semanticos.\n",
                     errores_semanticos);
 
+    /*
+    Libera las marcas de identificadores, contextos de funciones
+    y tabla de simbolos antes de terminar la compilacion.
+    */
         parser_liberar_marcas();
         parser_liberar_contextos_funciones();
         ts_destruir(tabla);
@@ -1793,6 +1936,10 @@ int main(int argc, char *argv[])
         return errores_semanticos == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
+    /*
+    Si yyparse detecta un error sintactico se descartan las
+    estructuras auxiliares y el compilador termina con error.
+    */
     fprintf(stderr, "Programa sintacticamente incorrecto.\n");
     raiz = NULL;
     parser_liberar_marcas();
@@ -1801,6 +1948,11 @@ int main(int argc, char *argv[])
     tabla = NULL;
     return EXIT_FAILURE;
 
+    /*
+    Ruta de limpieza para los errores de generacion de codigo.
+    Elimina archivos temporales y libera el AST, los contextos
+    y la tabla de simbolos antes de devolver EXIT_FAILURE.
+    */
 error_compilacion:
     remove(ruta_asm_intermedia);
     remove(ruta_asm_resuelta);
