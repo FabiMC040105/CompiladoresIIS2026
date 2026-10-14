@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Pruebas de integración del análisis semántico. Ejecutar desde proyecto-1/src:
-# bash probar_semantico.sh
+# Pruebas de integración del análisis semántico
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 

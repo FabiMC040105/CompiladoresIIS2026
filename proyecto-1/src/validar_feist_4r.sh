@@ -147,10 +147,7 @@ for caso in factorial mientras condicional para; do
     for tipo in secuencial paralela; do
         cargar_mem "$d/$tipo.mem" "$d/programa_prueba.mem" || { FALLOS=$((FALLOS+1)); continue; }
         # El testbench exige declarar explicitamente el modo paralelo.
-        extras=()
-        if [[ "$tipo" == "paralela" ]]; then
-            extras=(+exigir_paralelo)
-        fi
+        extras=(+exigir_paralelo)
         if ! ( cd "$d" && vvp "$RUN/regresion.vvp" \
                   "+fin_pc=$fin" "+resultado_dir=$addr" "+esperado=$esp" \
                   "+snapshot=$tipo" "${extras[@]}" >"$tipo.log" 2>&1 ); then
