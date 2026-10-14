@@ -18,7 +18,7 @@ SALIDA ?=
 
 .PHONY: all help run clean rebuild resolver arbol ast test \
         test-etiquetas test-resolucion test-integracion-etiquetas \
-        test-binario
+        test-binario test-vliw
 
 all: $(TARGET) resolver_asm
 
@@ -46,7 +46,7 @@ help:
 	  'Pruebas de etiquetas y saltos:' \
 	  '  make test-etiquetas' \
 	  '  make test-resolucion' \
-	  '  make test' \
+	  '  make test                  Ejecuta etiquetas, resolucion, binario y VLIW' \
 	  '' \
 	  'Resolver etiquetas de un ensamblador:' \
 	  '  make resolver ENTRADA=programa.asm SALIDA=programa_resuelto.asm' \
@@ -62,7 +62,7 @@ help:
 # Generar parser con Bison.
 parser.tab.c: $(PARSER) ast.h tabla_simbolos.h semantico.h \
               codegen.h codegen_tabla.h scheduler.h \
-              resolucion_etiquetas.h etiquetas.h binario.h
+              resolucion_etiquetas.h etiquetas.h binario.h vliw_packer.h
 	$(BISON) $(BISONFLAGS) -o $@ $(PARSER)
 
 # Generar lexer con Flex.
@@ -80,12 +80,13 @@ $(TARGET): parser.tab.c lex.yy.c ast.c ast.h \
            codegen_tabla.c codegen_tabla.h \
            resolucion_etiquetas.c resolucion_etiquetas.h \
            etiquetas.c etiquetas.h \
-           binario.c binario.h
+           binario.c binario.h \
+           vliw_packer.c vliw_packer.h
 	$(CC) $(CFLAGS) -o $@ \
 	    parser.tab.c lex.yy.c ast.c \
 	    tabla_simbolos.c memoria.c semantico.c \
 	    asm_emitter.c scheduler.c codegen.c codegen_tabla.c \
-	    resolucion_etiquetas.c etiquetas.c binario.c
+	    resolucion_etiquetas.c etiquetas.c binario.c vliw_packer.c
 
 # Compilar el programa auxiliar de resolucion de etiquetas.
 resolver_asm: resolver_asm_main.c \
@@ -143,7 +144,7 @@ test-resolucion: prueba_resolucion_asm
 test-integracion-etiquetas: test-resolucion
 
 # Ejecutar ambas suites de pruebas.
-test: test-etiquetas test-resolucion test-binario
+test: test-etiquetas test-resolucion test-binario test-vliw
 
 # Prueba del codificador binario integrado.
 prueba_binario: prueba_binario.c binario.c binario.h
@@ -152,6 +153,15 @@ prueba_binario: prueba_binario.c binario.c binario.h
 # Ejecutar la prueba del ensamblador/binario.
 test-binario: prueba_binario
 	./prueba_binario
+
+
+# Prueba del empaquetador VLIW integrado.
+prueba_vliw_packer: prueba_vliw_packer.c vliw_packer.c vliw_packer.h scheduler.c scheduler.h
+	$(CC) $(CFLAGS) -o $@ prueba_vliw_packer.c vliw_packer.c scheduler.c
+
+# Ejecutar la prueba de empaquetamiento VLIW.
+test-vliw: prueba_vliw_packer
+	./prueba_vliw_packer
 
 # Reconstruir los ejecutables.
 rebuild:
@@ -162,6 +172,7 @@ rebuild:
 # Se conservan los archivos .asm y .bin para no borrar resultados utiles.
 clean:
 	rm -f cdff cdff.exe compilador compilador.exe resolver_asm \
-	      prueba_etiquetas prueba_resolucion_asm prueba_binario \
+	      prueba_etiquetas prueba_resolucion_asm prueba_binario prueba_vliw_packer \
 	      parser.tab.c parser.tab.h lex.yy.c \
-	      prueba_etiquetas_entrada.tmp prueba_etiquetas_resuelta.tmp
+	      prueba_etiquetas_entrada.tmp prueba_etiquetas_resuelta.tmp \
+	      prueba_vliw_entrada.tmp prueba_vliw_salida.tmp

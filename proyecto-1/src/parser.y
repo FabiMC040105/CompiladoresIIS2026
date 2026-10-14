@@ -26,6 +26,7 @@ entre el lexer y el parser.
 #include "codegen_tabla.h"
 #include "resolucion_etiquetas.h"
 #include "binario.h"
+#include "vliw_packer.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1506,6 +1507,7 @@ int main(int argc, char *argv[])
     int i;
     FILE *entrada = NULL;
     char ruta_asm_intermedia[1024];
+    char ruta_asm_resuelta[1024];
 
     /* ------------------------------------------------------------
      * Procesamiento de opciones de linea de comandos.
@@ -1599,6 +1601,9 @@ int main(int argc, char *argv[])
             archivo_fuente, ".intermedio.asm",
             ruta_asm_intermedia, sizeof(ruta_asm_intermedia)) ||
         !construir_ruta_con_extension(
+            archivo_fuente, ".resuelto.asm",
+            ruta_asm_resuelta, sizeof(ruta_asm_resuelta)) ||
+        !construir_ruta_con_extension(
             archivo_fuente, ".asm", ruta_asm, sizeof(ruta_asm)))
     {
         fprintf(stderr, "Error: la ruta del archivo es demasiado larga.\n");
@@ -1617,7 +1622,8 @@ int main(int argc, char *argv[])
     }
 
     if (strcmp(ruta_asm, ruta_bin) == 0 ||
-        strcmp(ruta_asm_intermedia, ruta_bin) == 0)
+        strcmp(ruta_asm_intermedia, ruta_bin) == 0 ||
+        strcmp(ruta_asm_resuelta, ruta_bin) == 0)
     {
         fprintf(stderr, "Error: el archivo binario no puede usar la misma ruta que el ASM.\n");
         return EXIT_FAILURE;
@@ -1716,11 +1722,24 @@ int main(int argc, char *argv[])
 
                 if (!resolver_etiquetas_asm(
                         ruta_asm_intermedia,
-                        ruta_asm,
+                        ruta_asm_resuelta,
                         opcion_verbose ? stdout : NULL))
                 {
                     fprintf(stderr,
                             "Error: fallo la resolucion de etiquetas.\n");
+                    goto error_compilacion;
+                }
+
+                if (opcion_verbose)
+                    printf("[FASE 5.5] Empaquetando operaciones independientes en bundles VLIW...\n");
+
+                if (!vliw_empaquetar_archivo(
+                        ruta_asm_resuelta,
+                        ruta_asm,
+                        opcion_verbose ? stdout : NULL))
+                {
+                    fprintf(stderr,
+                            "Error: fallo el empaquetamiento VLIW.\n");
                     goto error_compilacion;
                 }
 
@@ -1739,6 +1758,7 @@ int main(int argc, char *argv[])
                 }
 
                 remove(ruta_asm_intermedia);
+                remove(ruta_asm_resuelta);
 
                 if (!opcion_asm)
                     remove(ruta_asm);
@@ -1782,6 +1802,10 @@ int main(int argc, char *argv[])
     return EXIT_FAILURE;
 
 error_compilacion:
+    remove(ruta_asm_intermedia);
+    remove(ruta_asm_resuelta);
+    if (!opcion_asm)
+        remove(ruta_asm);
     if (raiz != NULL) {
         ast_liberar(raiz);
         raiz = NULL;

@@ -13,3 +13,9 @@ lexer
 /__pycache__/
 /*.bak_feist_e
 /evidencia-vliw/
+/cdff
+/prueba_vliw_packer
+/*.intermedio.asm
+/*.resuelto.asm
+/prueba_vliw_entrada.tmp
+/prueba_vliw_salida.tmp
