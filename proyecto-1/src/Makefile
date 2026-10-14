@@ -13,7 +13,8 @@ BISONFLAGS := -d -Wall
 .PHONY: all run clean rebuild resolver test-etiquetas test-resolucion test-integracion-etiquetas
 
 # Archivo de prueba por defecto
-FILE ?= pru1.txt
+FILE ?= factorial.e
+ARGS ?=
 
 all: $(TARGET) resolver_asm
 
@@ -48,8 +49,8 @@ resolver: resolver_asm
 
 # Ejecutar el compilador con un archivo y resolver las etiquetas
 run: $(TARGET) resolver_asm
-	./$(TARGET) < $(FILE)
-	./resolver_asm salida.asm salida_resuelta.asm
+	./$(TARGET) $(ARGS) "$(FILE)"
+	./resolver_asm "$(basename $(FILE)).asm" salida_resuelta.asm
 
 # Pruebas antiguas de nuestra tabla de etiquetas
 test-etiquetas:

@@ -45,6 +45,7 @@ typedef struct NodoAST
 NodoAST *ast_crear(TipoNodo tipo, const char *valor);
 void ast_agregar_hijo(NodoAST *padre, NodoAST *hijo);
 void ast_imprimir(NodoAST *nodo, int nivel);
+void ast_imprimir_consola(NodoAST *nodo, int nivel);
 void ast_liberar(NodoAST *nodo);
 
 #endif

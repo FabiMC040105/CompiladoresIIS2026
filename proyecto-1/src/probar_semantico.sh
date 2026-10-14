@@ -27,7 +27,8 @@ FALLAN=0
 probar() {
   local nombre="$1" expectativa="$2" patron="$3" programa="$4"
   local salida="$TEMP_DIR/salida.txt" estado=0
-  printf '%s\n' "$programa" | ./compilador >"$salida" 2>&1 || estado=$?
+  printf '%s\n' "$programa" > "$TEMP_DIR/programa.e"
+  ./compilador -v "$TEMP_DIR/programa.e" >"$salida" 2>&1 || estado=$?
   local correcto=0
   if [[ "$expectativa" == "VALIDO" ]]; then
     if [[ $estado -eq 0 ]] && grep -Fq 'Programa sintacticamente correcto' "$salida" &&
