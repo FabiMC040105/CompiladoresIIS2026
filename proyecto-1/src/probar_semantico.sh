@@ -15,8 +15,8 @@ if ! make > /tmp/semantico_compilacion_$$.log 2>&1; then
   exit 1
 fi
 rm -f /tmp/semantico_compilacion_$$.log
-if [[ ! -x ./compilador ]]; then
-  echo 'No existe ./compilador despues de make.' >&2
+if [[ ! -x ./cdff ]]; then
+  echo 'No existe ./cdff despues de make.' >&2
   exit 1
 fi
 TEMP_DIR="$(mktemp -d)" || exit 1
@@ -27,7 +27,8 @@ FALLAN=0
 probar() {
   local nombre="$1" expectativa="$2" patron="$3" programa="$4"
   local salida="$TEMP_DIR/salida.txt" estado=0
-  printf '%s\n' "$programa" | ./compilador >"$salida" 2>&1 || estado=$?
+  printf '%s\n' "$programa" > "$TEMP_DIR/programa.e"
+  ./cdff -v "$TEMP_DIR/programa.e" >"$salida" 2>&1 || estado=$?
   local correcto=0
   if [[ "$expectativa" == "VALIDO" ]]; then
     if [[ $estado -eq 0 ]] && grep -Fq 'Programa sintacticamente correcto' "$salida" &&

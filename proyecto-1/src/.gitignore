@@ -1,2 +1,15 @@
 lex.yy.c
 lexer
+
+# Archivos generados localmente
+/compilador
+/resolver_asm
+/parser.tab.c
+/parser.tab.h
+/lex.yy.c
+/*.mem
+/*.log
+/salida*.asm
+/__pycache__/
+/*.bak_feist_e
+/evidencia-vliw/

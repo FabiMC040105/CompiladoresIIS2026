@@ -80,35 +80,54 @@ static int resolver_por_nodo(void *contexto,
                              CodegenSimbolo *salida)
 {
     (void)contexto;
-
+    memset(salida, 0, sizeof(*salida));
     salida->nombre = nombre;
     salida->tipo = "entero";
     salida->forma = CODEGEN_FORMA_ESCALAR;
 
+    /* Las funciones se resuelven globalmente con su marco y firma. */
+    if (strcmp(nombre, "factorial") == 0) {
+        salida->categoria = CODEGEN_CAT_FUNCION;
+        salida->ubicacion = CODEGEN_UBICACION_FUNCION;
+        salida->tamano_parametros = 4;
+        salida->tamano_marco = 8;
+        return 1;
+    }
+    if (strcmp(nombre, "principal") == 0) {
+        salida->tipo = "vacio";
+        salida->categoria = CODEGEN_CAT_FUNCION;
+        salida->ubicacion = CODEGEN_UBICACION_FUNCION;
+        salida->tamano_marco = 8;
+        return 1;
+    }
+
+    salida->categoria = CODEGEN_CAT_VARIABLE;
+    salida->ubicacion = CODEGEN_UBICACION_LOCAL;
     if (identificador != NULL && identificador->linea < 100) {
         if (strcmp(nombre, "n") == 0) {
-            salida->direccion = 100;
+            salida->categoria = CODEGEN_CAT_PARAMETRO;
+            salida->ubicacion = CODEGEN_UBICACION_PARAMETRO;
+            salida->direccion = 8;
             return 1;
         }
         if (strcmp(nombre, "resultado") == 0) {
-            salida->direccion = 104;
+            salida->direccion = -4;
             return 1;
         }
         if (strcmp(nombre, "i") == 0) {
-            salida->direccion = 108;
+            salida->direccion = -8;
             return 1;
         }
     } else {
         if (strcmp(nombre, "n") == 0) {
-            salida->direccion = 200;
+            salida->direccion = -4;
             return 1;
         }
         if (strcmp(nombre, "resultado") == 0) {
-            salida->direccion = 204;
+            salida->direccion = -8;
             return 1;
         }
     }
-
     return 0;
 }
 
@@ -245,13 +264,13 @@ int main(void)
     EXIGIR("func_factorial:");
     EXIGIR("ret_factorial:");
     EXIGIR("BRU: JMP func_factorial");
-    EXIGIR("STORE x14, 0(x2)");
-    EXIGIR("LOAD x14, 0(x2)");
-    EXIGIR("ADD x15, x0");
-    EXIGIR("ADD x1, x14, x0");
+    EXIGIR("STORE x15, 0(x14)");
+    EXIGIR("LOAD x4, 8(x15)");
+    EXIGIR("ADD x15, x14, x0");
+    EXIGIR("ADD x1, x13, x0");
     EXIGIR("multiplicacion por software: shift-and-add");
-    EXIGIR("ADDI x13, x0, 100");
-    EXIGIR("ADDI x13, x0, 204");
+    EXIGIR("STORE x4, -4(x15)");
+    EXIGIR("barrera control x1: 1 NOP");
 
     if (strstr(salida, "ALU: MUL") != NULL ||
         strstr(salida, "BRU: CALL") != NULL ||

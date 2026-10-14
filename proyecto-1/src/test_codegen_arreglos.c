@@ -14,9 +14,21 @@ static int resolver_prueba(void *contexto,
 {
     (void)contexto;
 
+    if (strcmp(nombre, "principal") == 0) {
+        memset(salida, 0, sizeof(*salida));
+        salida->nombre = "principal";
+        salida->tipo = "vacio";
+        salida->categoria = CODEGEN_CAT_FUNCION;
+        salida->ubicacion = CODEGEN_UBICACION_FUNCION;
+        salida->tamano_marco = 48;
+        return 1;
+    }
+    salida->categoria = CODEGEN_CAT_VARIABLE;
+    salida->ubicacion = CODEGEN_UBICACION_LOCAL;
+
     if (strcmp(nombre, "i") == 0) {
         salida->nombre = "i";
-        salida->direccion = 0;
+        salida->direccion = -44;
         salida->tipo = "entero";
         salida->forma = CODEGEN_FORMA_ESCALAR;
         return 1;
@@ -24,7 +36,7 @@ static int resolver_prueba(void *contexto,
 
     if (strcmp(nombre, "x") == 0) {
         salida->nombre = "x";
-        salida->direccion = 4;
+        salida->direccion = -48;
         salida->tipo = "entero";
         salida->forma = CODEGEN_FORMA_ESCALAR;
         return 1;
@@ -32,7 +44,7 @@ static int resolver_prueba(void *contexto,
 
     if (strcmp(nombre, "v") == 0) {
         salida->nombre = "v";
-        salida->direccion = 100;
+        salida->direccion = -16;
         salida->tipo = "entero";
         salida->forma = CODEGEN_FORMA_LISTA;
         salida->cantidad_dimensiones = 1;
@@ -42,7 +54,7 @@ static int resolver_prueba(void *contexto,
 
     if (strcmp(nombre, "m") == 0) {
         salida->nombre = "m";
-        salida->direccion = 200;
+        salida->direccion = -40;
         salida->tipo = "entero";
         salida->forma = CODEGEN_FORMA_MATRIZ;
         salida->cantidad_dimensiones = 2;
@@ -225,7 +237,7 @@ static char *leer_archivo(const char *ruta)
 int main(void)
 {
     NodoAST *raiz = crear_programa_prueba();
-    CodegenConfig config;
+    CodegenConfig config = {0};
     char *contenido;
     const char *salida = "salida_codegen_arreglos.asm";
     int ok;
