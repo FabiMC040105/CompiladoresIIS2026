@@ -1,0 +1,21 @@
+#traigase "matematica.e" :)
+#traigase "comparaciones.e" :)
+
+defina vacio principal(){
+    entero lista numeros[6] = [4, 7, 10, 13, 16, 21] :)
+    entero i :)
+    entero cantidad = 6 :)
+    entero limite = 10 :)
+    entero resultado :)
+
+    para(i = 0, i < cantidad, i = i + 1){
+        si(esPar(numeros[i])){
+            resultado = cuadrado(numeros[i]) :)
+        }:)
+        si(esMayor(numeros[i] + 2, limite)){
+            resultado = numeros[i] + 2 :)
+        }:)
+    }:)
+}:)
+
+

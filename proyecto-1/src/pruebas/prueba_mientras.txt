@@ -1,0 +1,7 @@
+defina vacio principal() {
+    entero contador = 0 :)
+    mientras(contador < 3) {
+        entero temporal = contador :)
+        contador = contador + 1 :)
+    }:)
+}:)

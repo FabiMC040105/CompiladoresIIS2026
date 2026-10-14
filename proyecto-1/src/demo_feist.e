@@ -1,0 +1,17 @@
+defina vacio principal() {
+    entero authid = -1059188172 :)
+    entero authpw = -1412606344 :)
+    entero subllave = 287454020 :)
+    entero izquierda = 42 :)
+    entero derecha = 99 :)
+    entero cifradoizq = 0 :)
+    entero cifradoder = 0 :)
+
+    feist_auth(authid, authpw) :)
+    feist_kstore(0, 0, subllave) :)
+    feist_fround(izquierda, derecha, izquierda, derecha, 0, 0, 0) :)
+    cifradoizq = izquierda :)
+    cifradoder = derecha :)
+    feist_fround(izquierda, derecha, izquierda, derecha, 0, 0, 1) :)
+    feist_logout() :)
+}:)

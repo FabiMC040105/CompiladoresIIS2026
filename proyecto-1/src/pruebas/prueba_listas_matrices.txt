@@ -1,0 +1,8 @@
+entero lista numeros[3] = [1, 2, 3] :)
+entero matriz tabla[2][2] = [[1, 2], [3, 4]] :)
+
+defina vacio principal() {
+    entero filas = 2 :)
+    entero lista valores[4] :)
+    entero matriz tablero[filas][3] :)
+}:)

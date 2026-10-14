@@ -1,0 +1,21 @@
+lex.yy.c
+lexer
+
+# Archivos generados localmente
+/compilador
+/resolver_asm
+/parser.tab.c
+/parser.tab.h
+/lex.yy.c
+/*.mem
+/*.log
+/salida*.asm
+/__pycache__/
+/*.bak_feist_e
+/evidencia-vliw/
+/cdff
+/prueba_vliw_packer
+/*.intermedio.asm
+/*.resuelto.asm
+/prueba_vliw_entrada.tmp
+/prueba_vliw_salida.tmp
