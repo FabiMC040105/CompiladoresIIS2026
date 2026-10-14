@@ -1,0 +1,18 @@
+entero global = 7 :)
+
+defina entero sumar(entero a, entero b) {
+    entero resultado = a + b :)
+    devuelva resultado :)
+}:)
+
+defina vof estaActivo(entero lista datos[3], entero matriz tabla[2][2], vof activo) {
+    devuelva activo :)
+}:)
+
+defina vacio mostrar(entero n) {
+    entero temporal = n :)
+}:)
+
+defina vacio principal() {
+    entero respuesta = sumar(global, 2) :)
+}:)

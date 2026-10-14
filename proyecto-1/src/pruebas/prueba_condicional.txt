@@ -1,0 +1,15 @@
+
+defina vacio principal() {
+    entero x = 0 :)
+    entero resultado = 10 :)
+
+    mientras (x < 5) {
+        x = x + 1 :)
+    } :)
+
+    si (x == 5) {
+        resultado = resultado * 2 :)
+    } sino {
+        resultado = 0 :)
+    } :)
+} :)

@@ -1,0 +1,15 @@
+
+defina vacio principal() {
+    entero edad = 21 :)
+    entero contador = 0 :)
+
+    si (edad >= 18) {
+        contador = contador + 1 :)
+    } sino {
+        contador = 0 :)
+    } :)
+
+    mientras (contador < 5) {
+        contador = contador + 1 :)
+    } :)
+} :)
