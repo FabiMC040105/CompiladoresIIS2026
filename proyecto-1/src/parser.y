@@ -1,8 +1,21 @@
 %code requires {
+
+/*
+Incluye las definiciones del AST en el encabezado generado por
+Bison (parser.tab.h), lo cual permite compartir el tipo NodoAST
+entre el lexer y el parser.
+*/
 #include "ast.h"
+
 }
 
 %{
+    /*
+    Incluye las biblotecas y los modulos necesarios para la implementacion del parser
+    y la integracion con las otras fases del compilador (tabla de simbolos, semantica,
+    codegen, resolucion de etiquetas y generacion de codigo maquina), se ponen aqui
+    porque estas van en el codigo en C que genera bison y no en el encabezado de parser.tab.h.
+     */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,26 +24,48 @@
 #include "semantico.h"
 #include "codegen.h"
 #include "codegen_tabla.h"
+#include "resolucion_etiquetas.h"
+#include "binario.h"
 
+    /*
+    Declaraciones para la comunicacion entre lexer y parser.
+    yylex()-> obtiene tokens
+    yylineno-> contiene numero de lineas del source
+    yyerror()-> reporta erroes sintacticos
+    yyin-> flujo de entrada para el archivo del source
+    */
 int yylex(void);
 extern int yylineno;
 void yyerror(const char *s);
 extern FILE *yyin;
 
+    /*
+    Declara las estructuras globales que se utilizan en error_compilacion.
+    raiz alamcena la direccion al nodo prinicpal del AST y tabla mantiene.
+    direccion a la tabla de simbolos que se va generando durante el analisis.
+    */
 NodoAST *raiz = NULL;
 TablaSimbolos *tabla = NULL;
 
 
-/* Opciones recibidas desde la terminal. */
+    /* Opciones de compilacion (-v,-t,-m,-s,-p,-x) recibidas desde la terminal. */
 int opcion_verbose = 0;
 int opcion_ast = 0;
 int opcion_simbolos = 0;
-char ruta_asm[1024];
+int opcion_asm = 0;
+int opcion_paquetes = 0;
+int opcion_ensamblar = 0;
 
-/* Contextos de firmas: se preparan desde Flex al reconocer la cabecera.
- * Se registran como simbolos en las acciones existentes de Bison.
- * Nunca se modifica una produccion ni se recorre el AST.
- */
+    /* ruta_asm y ruta_bin almacenan las rutas de los archivos de ensamblador y codigo maquina. */
+char ruta_asm[1024];
+char ruta_bin[1024];
+
+    /*---------------------------FUNCIONES CABECERAS Y AMBITOS ---------------------------------------------------------------------------------------------*/
+
+    /*
+    Almacenamiento temporal de contexto de funciones reconocidas durante lexer y parser.
+    Todos se conserva en lista enlazada.
+    */
 typedef struct ContextoFuncion {
     const NodoAST *nodo_nombre; /* NULL para principal */
     Ambito *ambito;            /* ambito de parametros de la funcion */
@@ -40,22 +75,21 @@ typedef struct ContextoFuncion {
     struct ContextoFuncion *siguiente;
 } ContextoFuncion;
 
-static ContextoFuncion *contextos_funciones = NULL;
-static int esperando_tipo_funcion = 0;
-static int esperando_nombre_funcion = 0;
-static TipoDato retorno_lexico = TIPO_DESCONOCIDO;
+    /* Variables de reconocimiento de cabecera de las funciones del source. */
+static ContextoFuncion *contextos_funciones = NULL; /*mantiene lista de funcs*/
+static int esperando_tipo_funcion = 0; /*indicacion que se espera el tipo(entero, vof, vacio)*/
+static int esperando_nombre_funcion = 0; /*indicacion que se espera nombre de func, y crea ambito con params*/
+static TipoDato retorno_lexico = TIPO_DESCONOCIDO;/*almacena tipo de retorno temporalmente*/
 
-/* Avisos del lexer para reconocer solamente la cabecera defina TIPO nombre.
- * El registro de los simbolos se realiza desde acciones de Bison.
- */
-void parser_avisar_defina(void)
+    /* Funciones invocadas por lexer para cabecera de funcion. Usadas en Defina y lexer.l y en tipos lexer.l */
+void parser_avisar_defina(void) /* inicia reconocimiento*/
 {
     esperando_tipo_funcion = 1;
     esperando_nombre_funcion = 0;
     retorno_lexico = TIPO_DESCONOCIDO;
 }
 
-void parser_avisar_tipo(TipoDato tipo)
+void parser_avisar_tipo(TipoDato tipo) /*almacena tipo de retorno y prepara reconocimiento de nombre.*/
 {
     if (!esperando_tipo_funcion)
         return;
@@ -65,9 +99,11 @@ void parser_avisar_tipo(TipoDato tipo)
     esperando_nombre_funcion = 1;
 }
 
-/* Se invoca cuando Flex encuentra el nombre de la funcion (o PRINCIPAL).
- * Crea el ambito de parametros antes de analizar la lista de parametros.
- */
+    /*
+    Perpara contexto de funcion cuando se reconoce el nombre(lexer), verificacion de de que se declare en ambito global,
+    reserva memoria para almacenar informacion y crea el ambito donde se reconocen sus params. Agrega el nuevo contexto
+    a la lista de funciones y termina reconocimiento de cabecera.
+    */
 static void parser_preparar_funcion(const NodoAST *nombre,
                                    const char *texto, int linea,
                                    int principal)
@@ -108,13 +144,13 @@ static void parser_preparar_funcion(const NodoAST *nombre,
     esperando_nombre_funcion = 0;
 }
 
-void parser_marcar_principal(int linea)
+void parser_marcar_principal(int linea) /*Perpara contexto de funcion principal identificandola como punto de entrada al programa*/
 {
     parser_preparar_funcion(NULL, "principal", linea, 1);
 }
 
 static ContextoFuncion *parser_contexto_funcion(const NodoAST *nombre,
-                                                int principal)
+                                                int principal)        /* busca y retorna contexto de funcion previamente reconocida, Null si no encuentra contexto que coincida */
 {
     ContextoFuncion *ctx;
     for (ctx = contextos_funciones; ctx != NULL; ctx = ctx->siguiente)
@@ -125,7 +161,7 @@ static ContextoFuncion *parser_contexto_funcion(const NodoAST *nombre,
     return NULL;
 }
 
-static void parser_liberar_contextos_funciones(void)
+static void parser_liberar_contextos_funciones(void) /*recorre lista de contextos de funcs y libera memoria reservada de elementos(no ambitos)*/
 {
     while (contextos_funciones != NULL)
     {
@@ -134,33 +170,36 @@ static void parser_liberar_contextos_funciones(void)
         contextos_funciones = siguiente;
     }
 }
+    /*-------------------------------ADMIN DE AMBITOS Y RELACIONES DE AST----------------------------------------------------------------------------------*/
 
-/* Contexto lexico para los ambitos, sin alterar las producciones GLC.
- * Cada IDENTIFICADOR conserva una referencia al ambito en el que
- * fue reconocido. Esto evita errores si Bison lee tokens adelantados.
- */
+    /*
+    Estructura para asociacion de identificadores en AST con el ambito en que se reconocio.
+    nodo -> referencia a id dentro AST
+    ambito-> ambito donde se reconocio id
+    siguiente-> almacenamiento de marcas en la lista enlazada
+    */
 typedef struct MarcaIdentificador {
     const NodoAST *nodo;
     Ambito *ambito;
     struct MarcaIdentificador *siguiente;
 } MarcaIdentificador;
 
-static MarcaIdentificador *marcas_identificadores = NULL;
-static int errores_semanticos = 0;
+static MarcaIdentificador *marcas_identificadores = NULL; /* alamcena lista de id */
+static int errores_semanticos = 0; /*lleva  conteo de errores detectados*/
 
 /* El lexer indica que clase de bloque se abrira con la proxima llave.
    Solo afecta la etiqueta de visualizacion; NO altera la GLC ni el AST. */
 static const char *bloque_pendiente = NULL;
 static int linea_bloque_pendiente = 0;
 
-void parser_indicar_bloque(const char *tipo, int linea)
+void parser_indicar_bloque(const char *tipo, int linea)/*  Almacena temporalmente el tipo y la linea del siguiente bloque que sera abierto. Info desde lexer*/
 {
     bloque_pendiente = tipo;
     linea_bloque_pendiente = linea;
 }
 
-/* Invocadas desde lexer.l exclusivamente para registrar el contexto. */
-void parser_abrir_ambito_lexico(int linea)
+
+void parser_abrir_ambito_lexico(int linea)/*Abre ambito cuando reconoce llave de apertura. Invocadas desde lexer.l exclusivamente para registrar el contexto. */
 {
     char nombre[64];
     Ambito *padre;
@@ -192,8 +231,8 @@ void parser_abrir_ambito_lexico(int linea)
     }
 }
 
-/* La cabecera para necesita su propio ambito (independiente del cuerpo). */
-void parser_abrir_ambito_para_lexico(int linea)
+
+void parser_abrir_ambito_para_lexico(int linea)/*Crae ambito especifico para ciclos "para" mantiene variables declaradas durante inicializacion y dentro de cuerpo. */
 {
     char nombre[64];
     snprintf(nombre, sizeof(nombre), "Para L%d", linea);
@@ -206,7 +245,7 @@ void parser_abrir_ambito_para_lexico(int linea)
     }
 }
 
-void parser_cerrar_ambito_lexico(void)
+void parser_cerrar_ambito_lexico(void) /* Cierra ambito actual cuando lexer reconconoce llave de cierre */
 {
     /* Una llave de cierre extra sera rechazada por Bison.
        Nunca se intenta salir del ambito global. */
@@ -222,7 +261,7 @@ void parser_cerrar_ambito_lexico(void)
     }
 }
 
-void parser_marcar_identificador(NodoAST *nodo)
+void parser_marcar_identificador(NodoAST *nodo) /* Registra ambito donde fue reconocido un id, crea marca que relaciona nodo AST con ambito activo y almacena en lista enlazada */
 {
     MarcaIdentificador *marca;
 
@@ -248,7 +287,7 @@ void parser_marcar_identificador(NodoAST *nodo)
         parser_preparar_funcion(nodo, nodo->valor, nodo->linea, 0);
 }
 
-Ambito *parser_ambito_identificador(const NodoAST *nodo)
+Ambito *parser_ambito_identificador(const NodoAST *nodo) /*Busca ambito asociado a id del AST, recorre marcas registradas y retorna el ambito*/
 {
     MarcaIdentificador *marca;
     for (marca = marcas_identificadores; marca != NULL; marca = marca->siguiente)
@@ -258,8 +297,7 @@ Ambito *parser_ambito_identificador(const NodoAST *nodo)
 }
 
 
-/* Permite al analisis semantico consultar el
-   ambito registrado por el parser. */
+/* Permite al analisis semantico consultar el ambito registrado por el parser. */
 static const Ambito *resolver_ambito_semantico(
     const NodoAST *nodo,
     void *contexto
@@ -272,7 +310,7 @@ static const Ambito *resolver_ambito_semantico(
 
 
 
-static void parser_liberar_marcas(void)
+static void parser_liberar_marcas(void) /*libera la memoria utlizada por lista de marcas de id*/
 {
     while (marcas_identificadores != NULL)
     {
@@ -282,11 +320,17 @@ static void parser_liberar_marcas(void)
     }
 }
 
-/* Insercion al reducir Declaracion, con el ambito capturado por Flex.
- * No modifica el AST ni necesita recorrerlo.
- * Las dimensiones se guardan como texto, ya que la GLC acepta
- * tanto NUMERO como IDENTIFICADOR en Dimension.
- */
+  /*------------------------------------------------REGISTRO VARIABLES Y PARAMENTROS EN TABLA DE SIMBOLOS--------------------------------------------------------------------------------------------*/
+
+    /*
+    Registra variables declaradas en TS durante reduccion de Declaracion,
+    obtiene ambito original del id y establece tempralemnte como activo para la insecion,
+    permite registrar diferente formas de variables y almacena las dimensiones, detecta
+    declaraciones duplicadas en ambitos y errores semanticos, restaura ambito original
+
+    permite acumular errores semanticos sin detener el analisis inmediatamente
+
+    */
 static int parser_registrar_variable(const NodoAST *identificador,
                                     TipoDato tipo,
                                     FormaSimbolo forma,
@@ -340,7 +384,7 @@ static int parser_registrar_variable(const NodoAST *identificador,
 
     tabla->ambito_actual = ambito_guardado;
 
-    if (resultado == TS_ERROR_DUPLICADO)
+    if (resultado == TS_ERROR_DUPLICADO) /*nota: permite continuar aunque se registre error semantico si devuelve 1*/
     {
         fprintf(stderr,
                 "Error semantico en linea %d: variable '%s' "
@@ -361,9 +405,12 @@ static int parser_registrar_variable(const NodoAST *identificador,
     return 1;
 }
 
-/* Registra un parametro en el ambito de la funcion.
- * La firma se enlaza al simbolo de la funcion cuando Bison la reduce.
- */
+    /*
+    Registra parametros de funcion en TS, verifica identificadores pertenezcan al ambito de func
+    y que la simensionse sean validas para lista y matriz. Parametros se incetan en SIM_PARAMETRO
+
+    deteccion de parametros duplicados y registra errores semanticos
+    */
 static int parser_registrar_parametro(const NodoAST *identificador,
                                      TipoDato tipo, FormaSimbolo forma,
                                      const NodoAST *dim1, const NodoAST *dim2)
@@ -411,9 +458,18 @@ static int parser_registrar_parametro(const NodoAST *identificador,
     return 1;
 }
 
-/* Registra la funcion en Global y vincula los parametros ya insertados.
- * Solo recorre la tabla de simbolos, NUNCA el AST.
- */
+    /*
+    Registra una funcion en el ambito global de la tabla de simbolos durante su reduccion en Bison.
+    Recupera el contexto previamente preparado por el lexer y utiliza su informacion para registrar el nombre,
+    tipo de retorno y linea de declaracion.
+
+    Asocia el ambito de la funcion con su simbolo y recorre los parametros registrados previamente para construir
+    su firma, conservando el orden de declaracion.
+
+    Detecta funciones duplicadas en el ambito global y registra los errores semanticos correspondientes.
+
+    Tambien permite registrar la funcion principal
+    */
 static int parser_registrar_funcion(const NodoAST *nombre, int principal)
 {
     ContextoFuncion *ctx = parser_contexto_funcion(nombre, principal);
@@ -470,6 +526,17 @@ static int parser_registrar_funcion(const NodoAST *nombre, int principal)
     return 1;
 }
 
+    /*
+    Imprime las firmas de las funciones registradas en la tabla de simbolos.
+
+    Recorre los simbolos de categoria SIM_FUNCION y muestra el tipo de retorno, nombre, parametros,
+    formas y dimensiones correspondientes.
+
+    Tambien muestra el identificador del ambito de cada funcion y su cantidad total de parametros.
+
+    Se utiliza para visualizar la informacion de las funciones durante la depuracion del compilador.
+    */
+
 static void parser_imprimir_firmas(FILE *salida)
 {
     const Simbolo *simbolo;
@@ -512,6 +579,7 @@ static void parser_imprimir_firmas(FILE *salida)
                 simbolo->cantidad_parametros);
     }
 }
+
 
 /* Une dos listas de nodos hermanos. */
 static NodoAST *ast_unir(NodoAST *primero, NodoAST *segundo)
@@ -696,7 +764,7 @@ Importaciones
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -717,7 +785,7 @@ Globales
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    |  %empty
       {
           $$ = NULL;
       }
@@ -729,7 +797,7 @@ Unidades
       {
           $$ = $2;
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -796,7 +864,7 @@ Parametros
       {
           $$ = ast_crear_parametros(ast_unir($1, $2));
       }
-    |
+    |  %empty
       {
           $$ = ast_crear_parametros(NULL);
       }
@@ -807,7 +875,7 @@ ParametrosResto
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    |  %empty
       {
           $$ = NULL;
       }
@@ -879,7 +947,7 @@ Sentencias
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -976,7 +1044,7 @@ Inicializacion
       {
           $$ = $2;
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -988,7 +1056,7 @@ Inicializadorlista
           $$ = ast_crear(AST_LISTA, "literal");
           ast_agregar_hijo($$, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1000,7 +1068,7 @@ Inicializadormatriz
           $$ = ast_crear(AST_MATRIZ, "literal");
           ast_agregar_hijo($$, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1019,7 +1087,7 @@ RestoFilas
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1038,7 +1106,7 @@ Elementos
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1049,7 +1117,7 @@ RestoElementos
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1199,7 +1267,7 @@ Argumentos
       {
           $$ = ast_unir($1, $2);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1210,7 +1278,7 @@ RestoArgumentos
       {
           $$ = ast_unir($2, $3);
       }
-    |
+    | %empty
       {
           $$ = NULL;
       }
@@ -1374,38 +1442,116 @@ void yyerror(const char *s)
             s);
 }
 
+static void mostrar_uso(FILE *f)
+{
+    fprintf(f,
+        "Uso:\n"
+        "  cdff [opciones] <archivo.e>\n"
+        "  cdff -x <archivo.asm> [-o salida.bin] [-p]\n\n"
+        "Opciones:\n"
+        "  -v              Modo detallado: muestra las fases y decisiones importantes.\n"
+        "  -t              Imprime el AST y genera arbol.dot.\n"
+        "  -m              Imprime tabla de simbolos, ambitos y firmas.\n"
+        "  -o <archivo>    Nombre del archivo binario de salida.\n"
+        "  -s              Conserva tambien el ensamblador final (.asm).\n"
+        "  -x <archivo>    Ensambla directamente un archivo .asm a codigo maquina.\n"
+        "  -p              Muestra cada paquete en ASM, HEX y binario.\n"
+        "  -h, --help      Muestra esta ayuda.\n");
+}
+
+static int construir_ruta_con_extension(const char *entrada,
+                                         const char *extension,
+                                         char *salida,
+                                         size_t capacidad)
+{
+    char *punto;
+    char *barra1;
+    char *barra2;
+    char *barra;
+
+    if (entrada == NULL || extension == NULL || salida == NULL)
+        return 0;
+
+    if (snprintf(salida, capacidad, "%s", entrada) >= (int)capacidad)
+        return 0;
+
+    punto = strrchr(salida, '.');
+    barra1 = strrchr(salida, '/');
+    barra2 = strrchr(salida, '\\');
+    barra = barra1;
+    if (barra2 != NULL && (barra == NULL || barra2 > barra))
+        barra = barra2;
+
+    if (punto != NULL && (barra == NULL || punto > barra))
+        *punto = '\0';
+
+    if (strlen(salida) + strlen(extension) >= capacidad)
+        return 0;
+
+    strcat(salida, extension);
+    return 1;
+}
+
+static int copiar_ruta(const char *origen, char *destino, size_t capacidad)
+{
+    return snprintf(destino, capacidad, "%s", origen) < (int)capacidad;
+}
+
 int main(int argc, char *argv[])
 {
     int resultado;
-
     const char *archivo_fuente = NULL;
+    const char *archivo_asm_directo = NULL;
+    const char *salida_solicitada = NULL;
     int i;
     FILE *entrada = NULL;
+    char ruta_asm_intermedia[1024];
 
-    /* Leer las opciones y encontrar el archivo fuente. */
+    /* ------------------------------------------------------------
+     * Procesamiento de opciones de linea de comandos.
+     * ------------------------------------------------------------ */
     for (i = 1; i < argc; i++)
     {
         if (strcmp(argv[i], "-v") == 0)
-        {
             opcion_verbose = 1;
-        }
         else if (strcmp(argv[i], "-t") == 0)
-        {
             opcion_ast = 1;
-        }
         else if (strcmp(argv[i], "-m") == 0)
-        {
             opcion_simbolos = 1;
+        else if (strcmp(argv[i], "-s") == 0)
+            opcion_asm = 1;
+        else if (strcmp(argv[i], "-p") == 0)
+            opcion_paquetes = 1;
+        else if (strcmp(argv[i], "-o") == 0)
+        {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: -o requiere un archivo de salida.\n");
+                return EXIT_FAILURE;
+            }
+            salida_solicitada = argv[i];
+        }
+        else if (strcmp(argv[i], "-x") == 0)
+        {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: -x requiere un archivo .asm.\n");
+                return EXIT_FAILURE;
+            }
+            opcion_ensamblar = 1;
+            archivo_asm_directo = argv[i];
+        }
+        else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
+        {
+            mostrar_uso(stdout);
+            return EXIT_SUCCESS;
         }
         else if (argv[i][0] == '-')
         {
             fprintf(stderr, "Error: opcion desconocida: %s\n", argv[i]);
+            mostrar_uso(stderr);
             return EXIT_FAILURE;
         }
         else if (archivo_fuente == NULL)
-        {
             archivo_fuente = argv[i];
-        }
         else
         {
             fprintf(stderr, "Error: se indico mas de un archivo fuente.\n");
@@ -1413,54 +1559,88 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (opcion_ensamblar)
+    {
+        if (archivo_fuente != NULL) {
+            fprintf(stderr, "Error: -x no se combina con un archivo fuente .e.\n");
+            return EXIT_FAILURE;
+        }
+
+        if (salida_solicitada != NULL) {
+            if (!copiar_ruta(salida_solicitada, ruta_bin, sizeof(ruta_bin))) {
+                fprintf(stderr, "Error: ruta de salida demasiado larga.\n");
+                return EXIT_FAILURE;
+            }
+        } else if (!construir_ruta_con_extension(
+                       archivo_asm_directo, ".bin", ruta_bin, sizeof(ruta_bin))) {
+            fprintf(stderr, "Error: ruta de salida demasiado larga.\n");
+            return EXIT_FAILURE;
+        }
+
+        if (opcion_verbose)
+            printf("[FASE 6] Ensamblando %s -> %s\n",
+                   archivo_asm_directo, ruta_bin);
+
+        return binario_ensamblar_archivo(
+                   archivo_asm_directo,
+                   ruta_bin,
+                   opcion_paquetes,
+                   stdout)
+               ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
 
     if (archivo_fuente == NULL)
     {
-        fprintf(stderr,
-                "Uso: cdff [opciones] <archivo.e>\n"
-                "Opciones: -v -t -m\n");
+        mostrar_uso(stderr);
         return EXIT_FAILURE;
     }
 
-    /* Obtener el nombre de salida reemplazando .e por .asm. */
-    if (snprintf(ruta_asm, sizeof(ruta_asm), "%s", archivo_fuente)
-            >= (int)sizeof(ruta_asm))
+    if (!construir_ruta_con_extension(
+            archivo_fuente, ".intermedio.asm",
+            ruta_asm_intermedia, sizeof(ruta_asm_intermedia)) ||
+        !construir_ruta_con_extension(
+            archivo_fuente, ".asm", ruta_asm, sizeof(ruta_asm)))
     {
         fprintf(stderr, "Error: la ruta del archivo es demasiado larga.\n");
         return EXIT_FAILURE;
     }
 
-    char *extension = strrchr(ruta_asm, '.');
-
-    if (extension != NULL && strcmp(extension, ".e") == 0)
-        *extension = '\0';
-
-    if (strlen(ruta_asm) + strlen(".asm") >= sizeof(ruta_asm))
-    {
-        fprintf(stderr, "Error: la ruta de salida es demasiado larga.\n");
+    if (salida_solicitada != NULL) {
+        if (!copiar_ruta(salida_solicitada, ruta_bin, sizeof(ruta_bin))) {
+            fprintf(stderr, "Error: ruta de salida demasiado larga.\n");
+            return EXIT_FAILURE;
+        }
+    } else if (!construir_ruta_con_extension(
+                   archivo_fuente, ".bin", ruta_bin, sizeof(ruta_bin))) {
+        fprintf(stderr, "Error: la ruta binaria es demasiado larga.\n");
         return EXIT_FAILURE;
     }
 
-    strcat(ruta_asm, ".asm");
+    if (strcmp(ruta_asm, ruta_bin) == 0 ||
+        strcmp(ruta_asm_intermedia, ruta_bin) == 0)
+    {
+        fprintf(stderr, "Error: el archivo binario no puede usar la misma ruta que el ASM.\n");
+        return EXIT_FAILURE;
+    }
 
     entrada = fopen(archivo_fuente, "r");
-
-
     if (entrada == NULL)
     {
         perror("Error al abrir el archivo fuente");
         return EXIT_FAILURE;
     }
-
     yyin = entrada;
 
-    /* Paso 1: inicializar la tabla antes de iniciar Bison. */
     tabla = ts_crear();
     if (tabla == NULL)
     {
         fprintf(stderr, "Error: no se pudo crear la tabla de simbolos.\n");
+        fclose(entrada);
         return EXIT_FAILURE;
     }
+
+    if (opcion_verbose)
+        printf("[FASES 1-2] Analisis lexico, sintactico y construccion del AST...\n");
 
     resultado = yyparse();
     fclose(entrada);
@@ -1471,43 +1651,24 @@ int main(int argc, char *argv[])
         if (opcion_verbose)
             printf("\nPrograma sintacticamente correcto.\n");
 
+        if (opcion_verbose)
+            printf("[FASE 3] Asignando memoria y ejecutando analisis semantico...\n");
 
-        /* Asignar las direcciones de memoria (Camila) */
         if (ts_asignar_direcciones_globales(tabla) != TS_OK)
         {
             fprintf(stderr,
                     "Error: no se pudieron asignar las direcciones globales.\n");
-
-            if (raiz != NULL)
-            {
-                ast_liberar(raiz);
-                raiz = NULL;
-            }
-
-            parser_liberar_marcas();
-            parser_liberar_contextos_funciones();
-            ts_destruir(tabla);
-            tabla = NULL;
-
-            return EXIT_FAILURE;
+            goto error_compilacion;
         }
 
-        /* Construir y analizar el AST */
         if (raiz != NULL)
         {
             if (opcion_ast)
             {
                 printf("\nArbol de sintaxis abstracta:\n");
                 ast_imprimir_consola(raiz, 0);
-
-                /* Conservar tambien la exportacion a Graphviz. */
                 ast_imprimir(raiz, 0);
             }
-
-
-            /* Primero ejecutar el analisis semantico */
-            if (opcion_verbose)
-                printf("\nIniciando analisis semantico...\n");
 
             errores_semanticos += semantico_analizar(
                 raiz,
@@ -1516,7 +1677,15 @@ int main(int argc, char *argv[])
                 NULL
             );
 
-            /* Generar ensamblador solo si no hay errores */
+            if (opcion_verbose)
+            {
+                if (errores_semanticos == 0)
+                    printf("[FASE 3] Analisis semantico finalizado sin errores.\n");
+                else
+                    printf("[FASE 3] Analisis semantico finalizado con %d errores.\n",
+                           errores_semanticos);
+            }
+
             if (errores_semanticos == 0)
             {
                 CodegenTablaContexto contexto_codegen;
@@ -1531,33 +1700,56 @@ int main(int argc, char *argv[])
                 config_codegen.contexto_simbolos =
                     &contexto_codegen;
 
+                if (opcion_verbose)
+                    printf("[FASE 4] Generando ensamblador y calendarizando dependencias...\n");
+
                 if (!codegen_generar_archivo(
-                        raiz, ruta_asm, &config_codegen))
+                        raiz, ruta_asm_intermedia, &config_codegen))
                 {
                     fprintf(stderr,
                             "Error: fallo la generacion de ensamblador.\n");
-
-                    ast_liberar(raiz);
-                    raiz = NULL;
-
-                    parser_liberar_marcas();
-                    parser_liberar_contextos_funciones();
-                    ts_destruir(tabla);
-                    tabla = NULL;
-
-                    return EXIT_FAILURE;
+                    goto error_compilacion;
                 }
 
                 if (opcion_verbose)
-                    printf("\nEnsamblador generado: %s\n", ruta_asm);
+                    printf("[FASE 5] Resolviendo etiquetas y offsets...\n");
+
+                if (!resolver_etiquetas_asm(
+                        ruta_asm_intermedia,
+                        ruta_asm,
+                        opcion_verbose ? stdout : NULL))
+                {
+                    fprintf(stderr,
+                            "Error: fallo la resolucion de etiquetas.\n");
+                    goto error_compilacion;
+                }
+
+                if (opcion_verbose)
+                    printf("[FASE 6] Generando codigo maquina...\n");
+
+                if (!binario_ensamblar_archivo(
+                        ruta_asm,
+                        ruta_bin,
+                        opcion_paquetes,
+                        stdout))
+                {
+                    fprintf(stderr,
+                            "Error: fallo la generacion del archivo binario.\n");
+                    goto error_compilacion;
+                }
+
+                remove(ruta_asm_intermedia);
+
+                if (!opcion_asm)
+                    remove(ruta_asm);
+                else if (opcion_verbose)
+                    printf("Ensamblador conservado: %s\n", ruta_asm);
             }
 
             ast_liberar(raiz);
             raiz = NULL;
         }
 
-
-        /* Mostrar la informacion de simbolos solo con -m. */
         if (opcion_simbolos)
         {
             printf("\nTabla de simbolos:\n");
@@ -1581,15 +1773,19 @@ int main(int argc, char *argv[])
         return errores_semanticos == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
-    printf("Programa sintacticamente incorrecto.\n");
-
-    /*
-     * Si el análisis falla antes de reducir Programa,
-     * Bison libera los valores semánticos descartados mediante
-     * los destructores definidos arriba.
-     */
+    fprintf(stderr, "Programa sintacticamente incorrecto.\n");
     raiz = NULL;
+    parser_liberar_marcas();
+    parser_liberar_contextos_funciones();
+    ts_destruir(tabla);
+    tabla = NULL;
+    return EXIT_FAILURE;
 
+error_compilacion:
+    if (raiz != NULL) {
+        ast_liberar(raiz);
+        raiz = NULL;
+    }
     parser_liberar_marcas();
     parser_liberar_contextos_funciones();
     ts_destruir(tabla);

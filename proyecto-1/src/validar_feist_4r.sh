@@ -38,7 +38,7 @@ iverilog -g2012 -s tb_regresion_e2e -o "$RUN/regresion.vvp" \
 generar(){
     local dir="$1"
     ( cd "$dir" || exit 1
-      "$SRC/compilador" programa.e > compilador.log 2>&1 || exit 1
+      "$SRC/cdff" -s programa.e > compilador.log 2>&1 || exit 1
       mv programa.asm salida.asm && "$SRC/resolver_asm" salida.asm salida_resuelta.asm > etiquetas.log 2>&1 || exit 1
       python3 "$SRC/preparar_asm.py" > preparar.log 2>&1 || exit 1
       python3 "$ASSEM" salida_para_binario.asm -o secuencial.mem > assembler_seq.log 2>&1 || exit 1
@@ -71,7 +71,7 @@ mkdir -p "$D"
 cp "$SRC/demo_feist_4r.e" "$D/programa.e"
 # "--exigir-feist" solo aplica al caso completo, no a los programas generales.
 if ! ( cd "$D" && \
-        "$SRC/compilador" programa.e > compilador.log 2>&1 && \
+        "$SRC/cdff" -s programa.e > compilador.log 2>&1 && \
         mv programa.asm salida.asm && "$SRC/resolver_asm" salida.asm salida_resuelta.asm > etiquetas.log 2>&1 && \
         python3 "$SRC/preparar_asm.py" > preparar.log 2>&1 && \
         python3 "$ASSEM" salida_para_binario.asm -o secuencial.mem > assembler_seq.log 2>&1 && \
