@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CDFF Studio · IDE</title>
+<style>
+:root{--navy:#18283d;--blue:#2259b5;--border:#dce4ef;--text:#24354a;--muted:#67788e;--bg:#f5f7fb;--white:#fff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:14px system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text)}
+header{background:var(--navy);color:white;display:flex;align-items:center;justify-content:space-between;padding:13px 24px;gap:12px}header strong{font-size:19px}header small{color:#bbc7da;margin-left:12px}.shell{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:calc(100vh - 54px)}aside{padding:20px 14px;border-right:1px solid var(--border);background:white}aside h3{font-size:11px;letter-spacing:1.4px;color:var(--muted);text-transform:uppercase;margin:14px 8px}.file{display:block;width:100%;text-align:left;padding:9px 12px;color:var(--text);border:0;background:transparent;border-radius:7px;cursor:pointer;font:inherit;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.file:hover{background:#eaf1ff}main{padding:20px;min-width:0}.toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:13px}.toolbar input{font:600 15px system-ui;border:1px solid var(--border);padding:10px;border-radius:7px;width:170px;background:white;color:var(--text)}button.btn{border:1px solid var(--border);background:white;border-radius:8px;padding:10px 14px;color:var(--text);font-weight:650;cursor:pointer}.btn.primary{background:var(--blue);color:white;border-color:var(--blue)}.btn:hover{filter:brightness(.96)}.pill{font-size:12px;color:#536b85;background:#e8eff8;border-radius:25px;padding:7px 12px;margin-left:auto}.window{background:white;border:1px solid var(--border);border-radius:11px;overflow:hidden;box-shadow:0 7px 22px #25395308}.window-label{padding:10px 18px;background:#fafbfd;border-bottom:1px solid var(--border);font-weight:650;font-size:13px}.editor-wrap{position:relative;display:flex;height:49vh;min-height:320px;background:#fff;overflow:hidden}#gutter{color:#8d9aae;background:#fafbfd;border-right:1px solid var(--border);font:14px/24px Consolas,Monaco,monospace;padding:15px 10px 15px 8px;min-width:53px;text-align:right;overflow:hidden;user-select:none;white-space:pre}#gutter .err{background:#fbe4e4;color:#bc3030;font-weight:bold}textarea{flex:1;resize:none;border:0;outline:0;padding:15px 16px;font:14px/24px Consolas,Monaco,monospace;color:#172f45;background:transparent;tab-size:4;white-space:pre;overflow:auto}section.output{margin-top:16px}.output pre{padding:17px;margin:0;min-height:105px;max-height:230px;overflow:auto;white-space:pre-wrap;font:12px/1.6 Consolas,monospace;color:#33475e}#status{font-size:12px;color:var(--muted)}.hint{color:var(--muted);font-size:12px;margin:9px 0 0}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#a5b4c6;margin-right:5px}.dot.ready{background:#2a9e71}.errorlist{font-size:12px;color:#a13838;margin:6px 0 0;padding-left:18px}.errorlist li{margin:6px 0}.errorlist li.jump{cursor:pointer}.fix-btn{margin-left:10px;border:1px solid #c17c44;color:#86501f;background:#fff7e9;border-radius:6px;padding:5px 9px;font-weight:650;cursor:pointer}.fix-btn:hover{background:#fce8ca}
+.completions{position:absolute;z-index:10;display:none;min-width:235px;max-width:min(340px,calc(100% - 60px));max-height:210px;overflow-y:auto;background:#fff;border:1px solid #b8c8dc;border-radius:9px;box-shadow:0 12px 28px #14283d27;padding:5px}
+.completions.visible{display:block}.completion-opt{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:0;border-radius:6px;background:white;color:#183653;cursor:pointer;text-align:left;padding:8px 10px;font:13px Consolas,Monaco,monospace}.completion-opt.selected,.completion-opt:hover{background:#e9f1ff}.completion-opt small{font:10px system-ui,sans-serif;color:#7386a0}.completion-help{padding:5px 10px;font:11px system-ui,sans-serif;color:#6e7e8f;border-top:1px solid #eef2f7}@media(max-width:720px){.shell{grid-template-columns:1fr}aside{display:none}main{padding:12px}.pill{margin-left:0}.editor-wrap{height:52vh}}
+.btn.secondary{background:#edf3ff;border-color:#c6d9f3;color:#254e91}
+.editor-wrap textarea{position:relative;z-index:2;background:transparent}
+#lineHighlights{position:absolute;z-index:1;left:53px;right:0;top:0;bottom:0;pointer-events:none;overflow:hidden}
+.highlight-error{position:absolute;left:0;right:0;height:24px;background:rgba(219,55,55,.13);border-left:3px solid #dc4444}
+.boxhelp{padding:12px 18px;color:#596e85;font-size:12px;border-top:1px solid var(--border);line-height:1.5}
+.clones-top{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:14px 18px}
+.clones-top label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px}
+#cloneResults{padding:0 18px 15px;font-size:12px;max-height:260px;overflow:auto}
+.clone-entry{border:1px solid var(--border);border-radius:7px;background:#fafcff;padding:10px;margin:7px 0;line-height:1.7}
+.clone-entry button{border:0;background:none;color:#1756ab;cursor:pointer;text-decoration:underline;padding:2px;font:inherit}
+@media(max-width:720px){#lineHighlights{left:53px}}
+ .live-switch{display:flex;align-items:center;gap:6px;font-size:12px;color:#536b85;white-space:nowrap}
+ .live-switch input{accent-color:#2259b5}
+ </style>
+</head>
+<body>
+<header><div><strong>CDFF Studio</strong><small>Proyecto 2 · Iteración 1 · V5 · QA</small></div><span id="status"><span class="dot"></span>Comprobando compilador…</span></header>
+<div class="shell">
+<aside><h3>Mis archivos</h3><div id="saved"></div><h3>Ejemplos existentes</h3><div id="examples"></div><p class="hint">Los ejemplos se abren como copia. Guardar nunca modifica el archivo original.</p></aside>
+<main>
+<div class="toolbar"><input id="filename" aria-label="Nombre del archivo" value="programa.e" spellcheck="false"><button id="new" class="btn">Nuevo</button><button id="save" class="btn">Guardar · Ctrl+S</button><button id="compile" class="btn primary">▶ Compilar · Ctrl+Enter</button><button id="check" class="btn secondary">Revisar sintaxis</button><label class="live-switch"><input id="liveReview" type="checkbox" checked> Sugerencias en vivo</label><span class="pill" id="message">Editor preparado</span></div>
+<div class="window"><div class="window-label">Editor de código <span style="float:right;color:#8090a0;font-weight:400" id="counter">Línea 1 · Columna 1</span></div><div class="editor-wrap"><div id="gutter">1</div><div id="lineHighlights"></div><textarea id="code" spellcheck="false" aria-label="Código del lenguaje CDFF" autocomplete="off" autocapitalize="off" aria-autocomplete="list" aria-controls="completions"></textarea><div id="completions" class="completions" role="listbox" aria-label="Sugerencias del lenguaje"></div></div></div>
+<section class="output window"><div class="window-label">Salida del compilador <span id="result" style="float:right;color:#738299">Sin ejecutar</span></div><pre id="console">Cuando pulses «Compilar», el IDE enviará el programa al ejecutable real cdff.</pre><ol id="errors" class="errorlist"></ol></section>
+<section class="output window"><div class="window-label">Detector de clones Tipo I y II (entre archivos)</div>
+<div class="clones-top"><button id="clones" class="btn secondary">Buscar clones</button><label><input type="checkbox" id="includeExamples"> Incluir ejemplos existentes</label><span class="hint">Guarda al menos dos archivos .e antes de comparar.</span></div>
+<div id="cloneResults" aria-live="polite">Sin analizar.</div>
+</section>
+<p class="hint">Los análisis de lenguaje y clones se ejecutan en C. Las correcciones requieren confirmación; la revisión rápida es orientativa y el parser de cdff mantiene la validación definitiva.</p>
+</main></div>
+<script>
+const $=id=>document.getElementById(id),code=$('code'),gutter=$('gutter');
+let errors=[];const initial=''; // El borrador nuevo siempre inicia vacío.
+let syntaxSequence=0,liveReviewTimer=null;
+function redraw(){let total=code.value.split('\n').length;gutter.innerHTML=Array.from({length:total},(_,i)=>errors.includes(i+1)?`<span class="err">${i+1}</span>`:`${i+1}`).join('\n');let pos=code.selectionStart,before=code.value.slice(0,pos),line=before.split('\n').length,col=before.length-before.lastIndexOf('\n');$('counter').textContent=`Línea ${line} · Columna ${col}`;drawHighlights()}
+function drawHighlights(){
+  const layer=$('lineHighlights');layer.replaceChildren();
+  for(const line of [...new Set(errors)]){
+    const y=15+(line-1)*24-code.scrollTop;
+    if(y< -24 || y>code.clientHeight)continue;
+    const div=document.createElement('div');div.className='highlight-error';div.style.top=y+'px';layer.append(div);
+  }
+}
+function msg(s){$('message').textContent=s}
+
+// El análisis de los candidatos se hace en ide_completion.c, que lee lexer.l.
+// JavaScript se limita a ubicar, mostrar e insertar la opción seleccionada.
+const completionBox=$('completions');
+let completionItems=[], completionSelected=0, completionPrefix='', completionStart=-1;
+let completionTimer=null, completionSequence=0;
+function closeCompletions(){
+  completionItems=[];completionPrefix='';completionStart=-1;
+  completionBox.classList.remove('visible');completionBox.replaceChildren();
+}
+function cursorWord(){
+  if(code.selectionStart!==code.selectionEnd)return null;
+  const pos=code.selectionStart;
+  const lineBefore=code.value.slice(code.value.lastIndexOf('\n',pos-1)+1,pos);
+  // No ofrecer palabras dentro de comentarios de línea iniciados por ^.
+  if(lineBefore.includes('^'))return null;
+  const match=lineBefore.match(/(#?[a-z][a-zA-Z_0-9]*)$/);
+  if(!match||match[1].length<2)return null;
+  // Evitar sugerir completaciones si estamos en medio de otra palabra.
+  if(/[a-zA-Z_0-9]/.test(code.value[pos]||''))return null;
+  return {prefix:match[1],start:pos-match[1].length,end:pos};
+}
+function positionCompletions(){
+  const pos=code.selectionStart, before=code.value.slice(0,pos);
+  const line=before.split('\n').length-1;
+  const last=before.slice(before.lastIndexOf('\n')+1);
+  const col=last.replace(/\t/g,'    ').length;
+  const width=code.parentElement.clientWidth;
+  const left=Math.max(54,Math.min(width-245,code.offsetLeft+16+col*8.45-code.scrollLeft));
+  const below=15+(line+1)*24-code.scrollTop;
+  const top=below+140>code.clientHeight ? Math.max(5,below-185) : Math.max(5,below);
+  completionBox.style.left=left+'px';completionBox.style.top=top+'px';
+}
+function showCompletions(items,word){
+  if(!items.length){closeCompletions();return;}
+  completionItems=items;completionSelected=0;
+  completionPrefix=word.prefix;completionStart=word.start;
+  completionBox.replaceChildren();
+  items.forEach((item,i)=>{
+    const btn=document.createElement('button');btn.type='button';btn.className='completion-opt'+(i===0?' selected':'');
+    btn.setAttribute('role','option');btn.setAttribute('aria-selected',String(i===0));
+    const label=document.createElement('span');label.textContent=item.word;
+    const type=document.createElement('small');type.textContent=item.token||'Token';
+    btn.append(label,type);
+    btn.addEventListener('mousedown',e=>e.preventDefault());
+    btn.onclick=()=>insertCompletion(i);
+    completionBox.append(btn);
+  });
+  const hint=document.createElement('div');hint.className='completion-help';hint.textContent='↑ ↓ seleccionar · Tab o Enter insertar · Esc cerrar';
+  completionBox.append(hint);
+  completionBox.classList.add('visible');positionCompletions();
+}
+function selectCompletion(index){
+  if(!completionItems.length)return;
+  completionSelected=(index+completionItems.length)%completionItems.length;
+  [...completionBox.querySelectorAll('.completion-opt')].forEach((btn,i)=>{
+    btn.classList.toggle('selected',i===completionSelected);
+    btn.setAttribute('aria-selected',String(i===completionSelected));
+    if(i===completionSelected)btn.scrollIntoView({block:'nearest'});
+  });
+}
+function insertCompletion(index){
+  const item=completionItems[index];if(!item)return;
+  const word=cursorWord();
+  if(!word||word.prefix!==completionPrefix||word.start!==completionStart){closeCompletions();return;}
+  code.focus();code.setRangeText(item.word,word.start,word.end,'end');
+  closeCompletions();++syntaxSequence;errors=[];$('errors').replaceChildren();
+  $('result').textContent='Código modificado: falta recompilar';redraw();scheduleLiveReview();
+}
+function scheduleCompletion(){
+  clearTimeout(completionTimer);
+  closeCompletions(); // no conservar opciones anteriores mientras llega la respuesta
+  const sequence=++completionSequence;
+  const word=cursorWord();
+  if(!word){closeCompletions();return;}
+  completionTimer=setTimeout(async()=>{
+    try{
+      const r=await request('/api/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:word.prefix})});
+      const now=cursorWord();
+      if(sequence!==completionSequence||!now||now.prefix!==word.prefix||now.start!==word.start)return;
+      showCompletions(r.items||[],word);
+    }catch(e){if(sequence===completionSequence)closeCompletions();}
+  },95);
+}
+
+async function request(url,options){let r=await fetch(url,options),d=await r.json();if(!r.ok)throw Error(d.error||'Error de comunicación');return d}
+function payload(){return {name:$('filename').value.trim(),content:code.value}}
+function post(url){return request(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})}
+async function refresh(){let data=await request('/api/files');for(let [id,origin,arr] of [['saved','saved',data.saved],['examples','example',data.examples]]){$(id).replaceChildren();for(let name of arr){let b=document.createElement('button');b.className='file';b.textContent='⌁  '+name;b.onclick=()=>openFile(origin,name);$(id).append(b)}}}
+async function openFile(origin,name){closeCompletions();clearTimeout(liveReviewTimer);++syntaxSequence;try{let data=await request(`/api/open?origin=${encodeURIComponent(origin)}&name=${encodeURIComponent(name)}`);code.value=data.content;$('filename').value=name;errors=[];$('errors').replaceChildren();$('result').textContent='Sin ejecutar';$('console').textContent='Pulsa Compilar para revisar este archivo.';redraw();msg(`Abierto: ${name}`)}catch(e){msg(e.message)}}
+async function save(){try{let d=await post('/api/save');msg('Guardado: '+d.name);await refresh()}catch(e){msg('Error: '+e.message)}}
+function jumpToLine(n){let rows=code.value.split('\n'),start=rows.slice(0,n-1).reduce((t,s)=>t+s.length+1,0);code.focus();code.setSelectionRange(start,start+Math.max(1,(rows[n-1]||'').length));redraw()}
+function renderIssues(suggestions, reported=[]){
+  const ul=$('errors');ul.replaceChildren();
+  errors=[...new Set([...suggestions.map(x=>x.line),...reported])].filter(n=>n>0);
+  redraw();
+  for(const s of suggestions){
+    // Una propuesta deja de ser válida si el texto del editor cambia.
+    s._source=code.value;
+    const li=document.createElement('li');li.className='jump';
+    li.textContent=`Línea ${s.line}: ${s.message} `;
+    li.onclick=()=>jumpToLine(s.line);
+    if(s.code!=='NO_FIX'){
+      const b=document.createElement('button');b.className='fix-btn';b.textContent='Aplicar corrección';
+      b.onclick=e=>{e.stopPropagation();applySuggestion(s)};li.append(b);
+    }
+    ul.append(li);
+  }
+  for(const n of reported.filter(n=>!suggestions.some(s=>s.line===n))){
+    const li=document.createElement('li');li.className='jump';
+    li.textContent=`Error del compilador en línea ${n} (clic para ir)`;
+    li.onclick=()=>jumpToLine(n);ul.append(li);
+  }
+}
+function applySuggestion(s){
+  const rows=code.value.split('\n'),i=s.line-1;
+  if(i<0||i>=rows.length){msg('La línea cambió; vuelve a revisar la sintaxis.');return;}
+  if(s.code==='NO_FIX')return;
+  if(s._source!==undefined && s._source!==code.value){
+    msg('El texto cambió; vuelve a revisar antes de aplicar.');return;
+  }
+  if(s.code==='APPEND_BLOCK'){
+    // No reproducir una corrección calculada antes de que el usuario editara.
+    if(rows[i].slice(s.column).trim()){
+      msg('El código cambió; vuelve a revisar la sintaxis.');return;
+    }
+    code.value=code.value.trimEnd()+'\n} :)\n';
+  }else{
+    const pos=s.column,old=s.expected??'',replacement=s.replacement??'';
+    if(pos<0||pos>rows[i].length||rows[i].slice(pos,pos+old.length)!==old){
+      msg('El código cambió; vuelve a revisar la sintaxis.');return;
+    }
+    // La propuesta en C contiene exactamente qué caracteres reemplazar;
+    // nunca añadimos una ":)" extra por nuestra cuenta.
+    rows[i]=rows[i].slice(0,pos)+replacement+rows[i].slice(pos+old.length);
+    code.value=rows.join('\n');
+  }
+  clearTimeout(liveReviewTimer);++syntaxSequence;closeCompletions();
+  renderIssues([]);jumpToLine(Math.min(s.line,code.value.split('\n').length));
+  $('result').textContent='Corrección aplicada; requiere compilación';
+  msg('Aplicado. Revisando de nuevo…');
+  // El motor vuelve a evaluar todo el texto, para evitar ediciones en cascada.
+  checkSyntax(true);
+}
+async function checkSyntax(quiet=false){
+  if(!quiet)closeCompletions();
+  const id=++syntaxSequence,snapshot=code.value,name=$('filename').value;
+  if(!quiet)msg('Revisando código con el analizador C…');
+  try{
+    const d=await post('/api/check');
+    if(id!==syntaxSequence||snapshot!==code.value||name!==$('filename').value)return;
+    renderIssues(d.suggestions||[]);
+    if(!quiet){
+      $('result').textContent=d.suggestions?.length?`Revisión: ${d.suggestions.length} observación(es)`:'Sin observaciones de revisión rápida';
+      $('console').textContent=d.suggestions?.length?'Se encontraron posibles errores. Revisa las sugerencias debajo; luego compila con cdff.':'El analizador auxiliar no encontró problemas evidentes. Para confirmar, compila con cdff.';
+      msg('Revisión local completada');
+    }else if(d.suggestions?.length){
+      msg(`${d.suggestions.length} sugerencia(s) · Revisión en vivo`);
+    }
+  }catch(e){if(!quiet&&id===syntaxSequence)msg('Error: '+e.message)}
+}
+function scheduleLiveReview(){
+  clearTimeout(liveReviewTimer);
+  if(!$('liveReview').checked||!code.value.trim())return;
+  liveReviewTimer=setTimeout(()=>checkSyntax(true),900);
+}
+async function compile(){
+  closeCompletions();clearTimeout(liveReviewTimer);++syntaxSequence;
+  msg('Compilando…');$('console').textContent='Ejecutando cdff…';
+  $('result').textContent='En curso';renderIssues([]);
+  const snapshot=code.value,name=$('filename').value;
+  try{
+    const d=await post('/api/compile');
+    if(snapshot!==code.value||name!==$('filename').value){msg('El código cambió mientras compilaba; vuelve a compilar.');return;}
+    renderIssues(d.suggestions||[],d.lines||[]);
+    $('console').textContent=d.output||d.message||(d.ok?'Compilación terminada sin mensajes':'Error de compilación');
+    $('result').textContent=d.ok?'✓ Compilación correcta':'✕ Revisar errores';
+    msg(d.ok?'Compilación terminada':'Revisar panel de salida');
+    if(d.artifacts?.length)$('console').textContent+='\n\nArchivos generados: '+d.artifacts.join(', ');
+  }catch(e){$('console').textContent=e.message;$('result').textContent='Error';msg(e.message)}
+}
+
+async function findClones(){
+  const panel=$('cloneResults');panel.textContent='Comparando archivos en C…';
+  try{
+    const data=await request('/api/clones',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({include_examples:$('includeExamples').checked})});
+    panel.replaceChildren();
+    const summary=document.createElement('p');
+    summary.textContent=`${data.files_scanned} archivos analizados · ${(data.clones||[]).length} coincidencias encontradas.`;
+    panel.append(summary);
+    if(!data.clones?.length){
+      const none=document.createElement('p');none.textContent=data.message||'No se encontraron fragmentos suficientemente largos.';
+      panel.append(none);return;
+    }
+    for(const item of data.clones){
+      const entry=document.createElement('div');entry.className='clone-entry';
+      const label=document.createElement('strong');label.textContent=`Tipo ${item.type} · `;entry.append(label);
+      for(const side of ['a','b']){
+        const file=item[`file_${side}`];const begin=item[`start_${side}`],last=item[`end_${side}`];
+        const btn=document.createElement('button');btn.textContent=`${file} (líneas ${begin}-${last})`;
+        btn.onclick=async()=>{
+          const origin=file.startsWith('Guardado/')?'saved':'example';
+          const name=file.split('/').pop();await openFile(origin,name);jumpToLine(begin);
+        };
+        if(side==='b')entry.append(document.createTextNode(' ↔ '));entry.append(btn);
+      }
+      panel.append(entry);
+    }
+  }catch(e){panel.textContent='Error: '+e.message}
+}
+$('check').onclick=()=>checkSyntax(false);$('clones').onclick=findClones;$('save').onclick=()=>{closeCompletions();save()};$('compile').onclick=compile;$('new').onclick=()=>{clearTimeout(liveReviewTimer);++syntaxSequence;closeCompletions();++completionSequence;clearTimeout(completionTimer);code.value='';code.defaultValue='';$('filename').value='programa.e';errors=[];$('errors').replaceChildren();$('console').textContent='Cuando pulses «Compilar», el IDE enviará el programa al ejecutable real cdff.';$('result').textContent='Sin ejecutar';redraw();msg('Nuevo borrador en blanco');code.focus()};code.oninput=()=>{++syntaxSequence;if(errors.length){errors=[];$('errors').replaceChildren();$('result').textContent='Código modificado: falta recompilar'}redraw();scheduleCompletion();scheduleLiveReview()};code.onclick=()=>{redraw();closeCompletions()};code.onkeyup=()=>{redraw()};$('liveReview').onchange=()=>{clearTimeout(liveReviewTimer);if($('liveReview').checked)scheduleLiveReview()};code.onscroll=()=>{gutter.scrollTop=code.scrollTop;drawHighlights();if(completionItems.length)positionCompletions()};code.onkeydown=e=>{if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();closeCompletions();compile();return}if(completionItems.length){if(e.key==='ArrowDown'){e.preventDefault();selectCompletion(completionSelected+1);return}if(e.key==='ArrowUp'){e.preventDefault();selectCompletion(completionSelected-1);return}if(e.key==='Tab'||e.key==='Enter'){e.preventDefault();insertCompletion(completionSelected);return}if(e.key==='Escape'){e.preventDefault();closeCompletions();return}}if(e.key==='Tab'){e.preventDefault();let a=code.selectionStart,b=code.selectionEnd;code.setRangeText('    ',a,b,'end');++syntaxSequence;redraw();scheduleLiveReview()}};document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key.toLowerCase()==='s'){e.preventDefault();save()}});
+code.value='';code.defaultValue='';redraw();request('/api/status').then(d=>{$('status').innerHTML=`<span class="dot ${d.compiler_ready?'ready':''}"></span>${d.compiler_ready?'Compilador cdff encontrado':'Falta compilar cdff'}`}).catch(()=>{$('status').textContent='Sin conexión al servidor'});refresh().catch(e=>msg(e.message));
+</script>
+</body></html>

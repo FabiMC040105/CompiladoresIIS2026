@@ -1,0 +1,21 @@
+# Archivos del usuario y binarios compilados: no subir a GitHub
+workspace/
+ide_analyzer
+__pycache__/
+*.pyc
+
+ide_completion
+
+ide_syntax
+ide_clones
+# Archivos temporales del IDE
+workspace/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Ejecutables generados en C
+ide_syntax
+ide_completion
+ide_clones
+ide_analyzer
