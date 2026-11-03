@@ -47,7 +47,7 @@ HEADERS := ast.h tabla_simbolos.h memoria.h semantico.h \
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
         simbolos arbol ast resolver wave check-bin \
         test test-etiquetas test-resolucion test-integracion-etiquetas \
-        test-binario test-vliw test-scheduler test-semantico \
+        test-binario test-vliw test-scheduler test-memoria test-semantico \
         test-integracion test-feist-auto sim test-completo \
         clean rebuild
 
@@ -176,13 +176,27 @@ $(TEST_DIR)/test_scheduler: test_scheduler.c scheduler.c scheduler.h | $(TEST_DI
 test-scheduler: $(TEST_DIR)/test_scheduler
 	./$(TEST_DIR)/test_scheduler
 
+$(TEST_DIR)/test_memoria_dinamica: pruebas/test_memoria_dinamica.c memoria.c memoria.h | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ pruebas/test_memoria_dinamica.c memoria.c $(LDFLAGS) $(LDLIBS)
+
+$(TEST_DIR)/test_global_exacto: pruebas/test_global_exacto.c tabla_simbolos.c memoria.h | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ pruebas/test_global_exacto.c tabla_simbolos.c $(LDFLAGS) $(LDLIBS)
+
+$(TEST_DIR)/test_limite: pruebas/test_limite.c tabla_simbolos.c memoria.h | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ pruebas/test_limite.c tabla_simbolos.c $(LDFLAGS) $(LDLIBS)
+
+test-memoria: $(TEST_DIR)/test_memoria_dinamica $(TEST_DIR)/test_global_exacto $(TEST_DIR)/test_limite
+	./$(TEST_DIR)/test_memoria_dinamica
+	./$(TEST_DIR)/test_global_exacto
+	./$(TEST_DIR)/test_limite
+
 # 34 pruebas de sintaxis y semantica (script ya incluido en el proyecto).
 test-semantico: $(TARGET)
 	bash ./probar_semantico.sh
 
 # Suite local, no depende de instalar/descargar Arquitectura.
 test: all test-etiquetas test-resolucion test-binario test-vliw \
-      test-scheduler test-semantico
+      test-scheduler test-memoria test-semantico
 	@echo 'PASS: finalizaron las pruebas locales.'
 
 # ---------------------------------------------------------------

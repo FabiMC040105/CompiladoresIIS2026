@@ -79,9 +79,15 @@ static int construir_tabla(TablaSimbolos **salida)
     Simbolo *n = NULL, *resultado = NULL, *i = NULL;
     Simbolo *fn = NULL, *main_fn = NULL;
     Simbolo *main_n = NULL, *main_r = NULL;
+    Simbolo *global_grande = NULL;
     Ambito *guardado;
 
     if (!t) return 0;
+    /* Reserva global superior a los antiguos 32 KiB. */
+    if (ts_insertar(t, "global_grande", SIM_VARIABLE,
+                    TIPO_ENTERO, FORMA_LISTA, 1, &global_grande) != TS_OK ||
+        ts_definir_dimensiones(global_grande, "9000", NULL) != TS_OK)
+        return 0;
 
     amb_fact = ts_entrar_ambito(t, "factorial", AMBITO_FUNCION);
     if (!amb_fact) return 0;
@@ -203,6 +209,7 @@ int main(void)
     contexto.obtener_ambito_nodo = ambito_de_nodo;
     cfg.resolver_simbolo_nodo = codegen_resolver_desde_tabla;
     cfg.contexto_simbolos = &contexto;
+    cfg.fin_globales = (uint32_t)tabla->siguiente_direccion_global;
 
     if (!codegen_generar_archivo(ast, "salida_codegen_integracion.asm", &cfg)) {
         fprintf(stderr, "FALLO: codegen integrado rechazo factorial.\n");
@@ -216,6 +223,7 @@ int main(void)
     fprintf(stderr, "FALLO: falta: %s\n", (x)); return 1; } } while (0)
 
     EXIGIR("convencion: x2=retorno, x14=SP, x15=FP");
+    EXIGIR("memoria compartida: globales [0,36000)");
     EXIGIR("func_factorial:");
     EXIGIR("STORE x15, 0(x14)");
     EXIGIR("LOAD x4, 8(x15)");

@@ -1815,6 +1815,8 @@ int main(int argc, char *argv[])
                     codegen_resolver_desde_tabla;
                 config_codegen.contexto_simbolos =
                     &contexto_codegen;
+                config_codegen.fin_globales =
+                    (uint32_t)tabla->siguiente_direccion_global;
 
                 if (opcion_verbose)
                     printf("[FASE 4] Generando ensamblador y calendarizando dependencias...\n");

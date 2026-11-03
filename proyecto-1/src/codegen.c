@@ -1644,7 +1644,8 @@ static int emitir_push_reg(Codegen *cg, int reg)
 }
 
 /*
- * Comprueba en tiempo de ejecucion que una reserva completa no cruce 0x8000.
+ * Comprueba en tiempo de ejecucion que SP-reserva no invada los datos
+ * globales [0, fin_globales). No hay frontera fija a 32 KiB.
  * Usa x3 y x13 como registros reservados del backend.
  */
 static int emitir_verificacion_pila(Codegen *cg,
@@ -1673,7 +1674,7 @@ static int emitir_verificacion_pila(Codegen *cg,
             return 0;
     }
 
-    if (!emitir_constante(cg, REG_AUXILIAR, (int32_t)LIMITE_PILA) ||
+    if (!emitir_constante(cg, REG_AUXILIAR, (int32_t)cg->config.fin_globales) ||
         !emitir_instruccion(cg, "BRU",
                             "BGE x%d, x%d, %s",
                             REG_DIRECCION, REG_AUXILIAR, etiqueta_ok) ||
@@ -1807,7 +1808,8 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
                           BYTES_TEMPORALES_GUARDADOS +
                           simbolo_funcion.tamano_parametros +
                           simbolo_funcion.tamano_marco,
-                          TAMANO_CABECERA)) {
+                          TAMANO_CABECERA,
+                          cg->config.fin_globales)) {
         error_codegen(cg, nodo,
                       "el marco de '%s' no cabe ni con la pila vacia",
                       nodo->valor);
@@ -2612,7 +2614,8 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
 
     if (!pila_hay_espacio(PILA_INICIAL_DEFECTO,
                           simbolo_funcion.tamano_marco,
-                          TAMANO_CABECERA)) {
+                          TAMANO_CABECERA,
+                          cg->config.fin_globales)) {
         error_codegen(cg, nodo,
                       "el marco local de '%s' no cabe en la pila",
                       nombre->valor);
@@ -2745,7 +2748,8 @@ static void generar_programa(Codegen *cg, NodoAST *nodo)
     asm_emitir_comentario(&cg->emisor,
                           "convencion: x2=retorno, x14=SP, x15=FP");
     asm_emitir_comentario(&cg->emisor,
-                          "pila: 0x8000..0xFFFF, SP inicial=0x10000");
+                          "memoria compartida: globales [0,%u), stack desde 0x10000",
+                          cg->config.fin_globales);
 
     if (!emitir_constante(cg, REG_SP, (int32_t)PILA_INICIAL_DEFECTO) ||
         !emitir_instruccion(cg, "ALU",
@@ -3001,6 +3005,11 @@ int codegen_generar_archivo(NodoAST *raiz,
 
     memset(&cg, 0, sizeof(cg));
     cg.config = *config;
+    if (cg.config.fin_globales > MEMORIA_TOTAL_BYTES ||
+        (cg.config.fin_globales % TAMANO_PALABRA) != 0) {
+        fprintf(stderr, "Error: final de globales fuera de memoria o desalineado\n");
+        return 0;
+    }
     cg.raiz = raiz;
     scheduler_inicializar(&cg.scheduler);
 

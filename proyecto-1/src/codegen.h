@@ -66,6 +66,8 @@ typedef struct {
     void *contexto_simbolos;
     /* Compatibilidad historica: el scheduler actual ignora este campo. */
     unsigned nops_dependencia;
+    /* Primer byte libre despues de las globales (limite para x14/SP). */
+    uint32_t fin_globales;
 } CodegenConfig;
 
 int codegen_generar_archivo(NodoAST *raiz,
