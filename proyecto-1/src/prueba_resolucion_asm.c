@@ -86,17 +86,93 @@ static void etiqueta_duplicada(void)
     CHEQUEAR(!resolver_etiquetas_asm(ORIGEN, RESUELTA, NULL), "etiqueta duplicada rechazada");
 }
 
-static void salto_fuera_rango(const char *inicio)
+static void salto_condicional_largo(const char *instruccion,
+                                   const char *salto_corto)
 {
-    FILE *f = fopen(ORIGEN,"w");
+    FILE *f = fopen(ORIGEN, "w");
+    char *r;
     int i;
     if (!f) exit(2);
-    fprintf(f, "%s\n", inicio);
-    for (i=0; i<130; ++i) fputs("ALU: NOP\n", f);
+    fprintf(f, "%s\n", instruccion);
+    for (i = 0; i < 130; ++i) fputs("ALU: NOP\n", f);
+    fputs("LEJOS:\nALU: NOP\n", f);
+    fclose(f);
+    CHEQUEAR(resolver_etiquetas_asm(ORIGEN, RESUELTA, NULL),
+             "branch largo relajado automaticamente");
+    r = leer(RESUELTA);
+    CHEQUEAR(r != NULL, "salida generada para branch largo");
+    if (r != NULL) {
+        CHEQUEAR(strstr(r, salto_corto) != NULL,
+                 "salto condicional corto correcto");
+        CHEQUEAR(strstr(r, "BRU: JMP 2096\n") != NULL,
+                 "JMP llega al destino lejano");
+        free(r);
+    }
+}
+
+static void salto_condicional_hacia_atras(void)
+{
+    FILE *f = fopen(ORIGEN, "w");
+    char *r;
+    int i;
+    if (!f) exit(2);
+    fputs("INICIO:\n", f);
+    for (i = 0; i < 130; ++i) fputs("ALU: NOP\n", f);
+    fputs("BRU: BNE x2, x0, INICIO\nALU: NOP\n", f);
+    fclose(f);
+    CHEQUEAR(resolver_etiquetas_asm(ORIGEN, RESUELTA, NULL),
+             "branch lejano hacia atras convertido a JMP");
+    r = leer(RESUELTA);
+    CHEQUEAR(r != NULL, "salida salto hacia atras existe");
+    if (r != NULL) {
+        CHEQUEAR(strstr(r, "BRU: BEQ x2, x0, 32\n") != NULL,
+                 "branch invertido no tomado evita el salto largo");
+        CHEQUEAR(strstr(r, "BRU: JMP -2096\n") != NULL,
+                 "JMP largo hacia atras apunta al inicio");
+        free(r);
+    }
+}
+
+static void relajacion_en_cascada(void)
+{
+    FILE *f = fopen(ORIGEN, "w");
+    char *r;
+    int i;
+    if (!f) exit(2);
+    /* El primer branch inicialmente alcanza MEDIO (128 bundles).
+     * El segundo necesita expandirse y desplaza MEDIO un bundle,
+     * forzando otra expansion en una pasada posterior. */
+    fputs("BRU: BEQ x2, x0, MEDIO\n", f); /* 0 */
+    for (i = 1; i < 20; ++i) fputs("ALU: NOP\n", f);
+    fputs("BRU: BNE x3, x0, FIN\n", f);  /* 20 */
+    for (i = 21; i < 128; ++i) fputs("ALU: NOP\n", f);
+    fputs("MEDIO:\nALU: NOP\n", f);     /* 128 */
+    for (i = 129; i < 180; ++i) fputs("ALU: NOP\n", f);
+    fputs("FIN:\nALU: NOP\n", f);       /* 180 */
+    fclose(f);
+    CHEQUEAR(resolver_etiquetas_asm(ORIGEN, RESUELTA, NULL),
+             "branches que se desbordan en cascada son resueltos");
+    r = leer(RESUELTA);
+    CHEQUEAR(r != NULL, "salida para relajacion en cascada existe");
+    if (r != NULL) {
+        CHEQUEAR(strstr(r, "__branch_largo_fin_0:\n") != NULL &&
+                 strstr(r, "__branch_largo_fin_1:\n") != NULL,
+                 "dos iteraciones de relajacion realizaron ambas expansiones");
+        free(r);
+    }
+}
+
+static void pc_relativo_fuera_rango(void)
+{
+    FILE *f = fopen(ORIGEN, "w");
+    int i;
+    if (!f) exit(2);
+    fputs("ALU: ADDI x3, x1, LEJOS\n", f);
+    for (i = 0; i < 130; ++i) fputs("ALU: NOP\n", f);
     fputs("LEJOS:\nALU: NOP\n", f);
     fclose(f);
     CHEQUEAR(!resolver_etiquetas_asm(ORIGEN, RESUELTA, NULL),
-             "referencia PC relativa fuera de rango rechazada");
+             "ADDI PC relativo fuera de rango sigue siendo error");
 }
 
 int main(void)
@@ -104,8 +180,17 @@ int main(void)
     ejemplo_completo();
     etiqueta_inexistente();
     etiqueta_duplicada();
-    salto_fuera_rango("BRU: BEQ x2, x0, LEJOS");
-    salto_fuera_rango("ALU: ADDI x3, x1, LEJOS");
+    salto_condicional_largo("BRU: BEQ x2, x0, LEJOS",
+                            "BRU: BNE x2, x0, 32\n");
+    salto_condicional_largo("BRU: BNE x2, x0, LEJOS",
+                            "BRU: BEQ x2, x0, 32\n");
+    salto_condicional_largo("BRU: BGE x2, x0, LEJOS",
+                            "BRU: BGE x2, x0, 32\n");
+    salto_condicional_largo("BRU: BLE x2, x0, LEJOS",
+                            "BRU: BLE x2, x0, 32\n");
+    salto_condicional_hacia_atras();
+    relajacion_en_cascada();
+    pc_relativo_fuera_rango();
     remove(ORIGEN);
     remove(RESUELTA);
     printf("Pruebas de integracion ASM: %d comprobaciones, %d fallos.\n", pruebas, fallos);
