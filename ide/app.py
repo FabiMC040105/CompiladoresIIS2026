@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-"""IDE local inicial CDFF (solo biblioteca estandar de Python)."""
+
+"""
+Servidor local del entorno de desarrollo CDFF.
+
+Este módulo permite la comunicación entre la interfaz web y
+las herramientas del compilador. Se encarga de administrar
+los archivos del usuario, ejecutar la compilación y enviar
+los resultados a la interfaz.
+
+También integra las herramientas auxiliares escritas en C
+para el autocompletado, la revisión sintáctica y la
+detección de código duplicado.
+
+Se utiliza únicamente la biblioteca estándar de Python.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -11,17 +26,33 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+
+# CONFIGURACIÓN GENERAL
+
+"""
+Se definen las rutas utilizadas por el servidor y el
+directorio donde se almacenan los archivos del usuario.
+También se establece el tamaño máximo permitido para
+evitar procesar archivos demasiado grandes.
+"""
+
 IDE_DIR = Path(__file__).resolve().parent
 WORKSPACE = IDE_DIR / "workspace"
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 MAX_BYTES = 1024 * 1024
 
+# Verifica que el nombre del archivo sea válido y tenga extensión .e
 
 def clean_name(value: object) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[a-zA-Z0-9_\-]+\.e", value):
         raise ValueError("Use un nombre sencillo terminado en .e (letras, números, _ o -).")
     return value
 
+"""
+Lee los datos JSON enviados por la interfaz.
+Comprueba el tamaño de la solicitud y verifica que
+la información recibida tenga el formato esperado.
+"""
 
 def read_json(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length", "0"))
@@ -32,6 +63,11 @@ def read_json(handler: BaseHTTPRequestHandler) -> dict:
         raise ValueError("Se esperaba un objeto JSON.")
     return data
 
+"""
+Guarda el código fuente en el espacio de trabajo.
+Antes de escribir el archivo, valida su nombre,
+contenido y tamaño para evitar entradas inválidas.
+"""
 
 def write_workspace(name: object, content: object) -> Path:
     name = clean_name(name)
@@ -42,6 +78,14 @@ def write_workspace(name: object, content: object) -> Path:
     return target
 
 
+# HERRAMIENTAS AUXILIARES EN C
+
+"""
+Cada herramienta tiene su archivo fuente y su ejecutable.
+El servidor comprueba si están disponibles y los compila
+cuando es necesario, sin modificar el compilador principal.
+"""
+
 ANALYZER_SRC = IDE_DIR / "ide_analyzer.c"
 ANALYZER_EXE = IDE_DIR / "ide_analyzer"
 COMPLETION_SRC = IDE_DIR / "ide_completion.c"
@@ -51,6 +95,12 @@ SYNTAX_EXE = IDE_DIR / "ide_syntax"
 CLONES_SRC = IDE_DIR / "ide_clones.c"
 CLONES_EXE = IDE_DIR / "ide_clones"
 
+"""
+Construye el analizador auxiliar cuando su ejecutable
+no existe o cuando el archivo fuente fue modificado.
+Los errores de compilación se informan sin detener
+completamente el servidor del IDE.
+"""
 
 def build_analyzer() -> bool:
     """Compila solo el analizador adicional en C, sin tocar el compilador cdff."""
@@ -90,6 +140,12 @@ def build_completion() -> bool:
         print(f"AVISO: autocompletado C no disponible: {exc}", flush=True)
         return False
 
+"""
+Solicita sugerencias de autocompletado al módulo en C.
+El servidor valida el prefijo escrito por el usuario,
+ejecuta la herramienta y convierte su salida en datos
+que la interfaz puede utilizar para mostrar opciones.
+"""
 
 def completions_from_c(lexer: Path, prefix: object) -> list[dict]:
     """El filtro de tokens se ejecuta en C leyendo lexer.l; Python solo comunica la respuesta."""
@@ -154,6 +210,19 @@ def build_tool(source: Path, executable: Path) -> bool:
         return False
 
 
+# REVISIÓN SINTÁCTICA Y CORRECCIONES
+
+"""
+Ejecuta el analizador sintáctico auxiliar desarrollado en C y recibe las sugerencias de corrección
+Cada sugerencia contiene la línea, columna, tipo de corrección, texto esperado y mensaje descriptivo
+
+Las posiciones recibidas en bytes UTF-8 se convierten
+a índices UTF-16 para que coincidan con las posiciones
+utilizadas por el editor en JavaScript.
+
+Este módulo no decide qué reglas sintácticas son válidas; únicamente comunica y valida los resultados del analizador
+"""
+
 def syntax_from_c(source: Path) -> list[dict]:
     """Consulta reglas en C. Cada reemplazo trae texto original exacto y ubicación.
 
@@ -202,6 +271,15 @@ def syntax_from_c(source: Path) -> list[dict]:
                        "replacement": replacement, "message": message})
     return result[:80]
 
+# DETECCIÓN DE CÓDIGO DUPLICADO
+"""
+Reúne los archivos guardados y, cuando el usuario lo
+solicita, también los ejemplos del proyecto.
+
+Envía los archivos al detector implementado en C y
+organiza los resultados para mostrar coincidencias
+de tipo I y tipo II en la interfaz.
+"""
 
 def clones_from_c(src: Path, include_examples: bool) -> dict:
     if not CLONES_EXE.is_file():
@@ -237,6 +315,18 @@ def clones_from_c(src: Path, include_examples: bool) -> dict:
     return {"clones": clones, "files_scanned": len(items),
             "message": "Coincidencias entre archivos (3 o mas lineas y 18 o mas tokens)."}
 
+
+# SERVIDOR HTTP DEL IDE
+
+"""
+Define las rutas utilizadas para comunicar la interfaz web con las herramientas del proyecto
+
+Las solicitudes GET permiten consultar archivos, resultados y estado del sistema
+
+Las solicitudes POST permiten guardar, compilar, revisar sintaxis, solicitar autocompletado y
+buscar fragmentos de código duplicados.
+"""
+
 def handler_factory(src: Path):
     class Handler(BaseHTTPRequestHandler):
         def send_json(self, data: dict, status: int = 200) -> None:
@@ -247,6 +337,10 @@ def handler_factory(src: Path):
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+
+        # Atiende las solicitudes de consulta realizadas
+        # desde la interfaz, incluyendo la carga del editor,
+        # la lista de archivos y los resultados generados
 
         def do_GET(self) -> None:
             url = urlparse(self.path)
@@ -266,6 +360,92 @@ def handler_factory(src: Path):
                 examples = [p.name for p in sorted(src.glob("*.e")) if p.is_file()]
                 saved = [p.name for p in sorted(WORKSPACE.glob("*.e")) if p.is_file()]
                 self.send_json({"examples": examples, "saved": saved})
+            
+            elif url.path == "/api/artifact":
+                params = parse_qs(url.query)
+                name = params.get("name", [""])[0]
+                download = params.get("download", ["0"])[0] == "1"
+
+                if not re.fullmatch(
+                    r"[a-zA-Z0-9_-]+\.(asm|bin)", name
+                ):
+                    self.send_json(
+                        {"error": "Nombre de archivo inválido."}, 400
+                    )
+                    return
+
+                target = WORKSPACE / name
+
+                if not target.is_file():
+                    self.send_json(
+                        {"error": "El archivo no existe."}, 404
+                    )
+                    return
+
+                if target.stat().st_size > MAX_BYTES:
+                    self.send_json(
+                        {"error": "El archivo supera 1 MB."}, 413
+                    )
+                    return
+
+                """
+                Se conserva el contenido original del archivo para
+                permitir su descarga sin modificar ningún byte.
+                
+                Cuando el usuario solicita visualizar un archivo .bin,
+                se genera una representación hexadecimal con direcciones
+                y grupos de 16 bytes para facilitar su lectura.
+                
+                Esta representación es únicamente visual: el archivo
+                descargado conserva su contenido original.
+                """
+
+                raw = target.read_bytes()
+
+                if download:
+                    self.send_response(200)
+                    self.send_header(
+                        "Content-Type", "application/octet-stream"
+                    )
+                    self.send_header(
+                        "Content-Disposition",
+                        f'attachment; filename="{name}"'
+                    )
+                    self.send_header(
+                        "X-Content-Type-Options", "nosniff"
+                    )
+                    self.send_header(
+                        "Content-Length", str(len(raw))
+                    )
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
+
+                if name.endswith(".asm"):
+                    content = raw.decode("utf-8", errors="replace")
+                    kind = "asm"
+                else:
+                    rows = []
+
+                    for offset in range(0, len(raw), 16):
+                        chunk = raw[offset:offset + 16]
+                        hexadecimal = " ".join(
+                            f"{byte:02X}" for byte in chunk
+                        )
+                        rows.append(
+                            f"{offset:08X}  {hexadecimal}"
+                        )
+
+                    content = "\n".join(rows)
+                    kind = "bin"
+
+                self.send_json({
+                    "name": name,
+                    "kind": kind,
+                    "size": len(raw),
+                    "content": content
+                })
+
             elif url.path == "/api/open":
                 params = parse_qs(url.query)
                 try:
@@ -279,6 +459,10 @@ def handler_factory(src: Path):
                     self.send_json({"error": str(exc)}, 400)
             else:
                 self.send_json({"error": "Ruta no encontrada"}, 404)
+
+        # Procesa las acciones enviadas desde el editor.
+        # Según la ruta solicitada, utiliza la herramienta
+        # correspondiente y devuelve una respuesta JSON.
 
         def do_POST(self) -> None:
             url = urlparse(self.path)
@@ -308,11 +492,33 @@ def handler_factory(src: Path):
                 if url.path == "/api/save":
                     self.send_json({"ok": True, "name": name, "saved_to": str(file)})
                     return
+               
+                # EJECUCIÓN DEL COMPILADOR CDFF
+                """
+                Se verifica que el compilador esté disponible y se
+                preparan las rutas de los archivos de salida.
+                
+                Antes de ejecutar una nueva compilación se eliminan
+                los resultados anteriores para evitar mostrar archivos
+                que no correspondan al código actual.
+                
+                La compilación se ejecuta como un proceso independiente.
+                Su salida, estado y diagnósticos se envían a la interfaz
+                para informar al usuario y mostrar los resultados.
+                """
+
                 executable = src / "cdff"
                 if not executable.is_file():
                     self.send_json({"ok": False, "message": "No se encontró cdff. Ejecute 'make' en proyecto-1/src desde WSL/Ubuntu y vuelva a compilar.", "lines": [], "output": ""})
                     return
                 out = WORKSPACE / (Path(name).stem + ".bin")
+                
+                asm_out = file.with_suffix(".asm")
+
+                for generated in (out, asm_out):
+                    if generated.is_file():
+                        generated.unlink()
+
                 try:
                     proc = subprocess.run([str(executable), "-s", "-o", str(out), str(file)], cwd=src, text=True, capture_output=True, timeout=30, check=False)
                     output = (proc.stdout + "\n" + proc.stderr).strip()
@@ -335,6 +541,16 @@ def handler_factory(src: Path):
 
     return Handler
 
+# INICIALIZACIÓN DEL IDE
+
+"""
+Configura la ubicación del compilador y el puerto HTTP.
+Comprueba que existan los archivos principales del
+lenguaje y prepara las herramientas auxiliares.
+
+Finalmente, inicia el servidor local que permite
+utilizar el IDE desde el navegador.
+"""
 
 def main():
     ap = argparse.ArgumentParser(description="IDE CDFF Iteración 1 (versión inicial)")
