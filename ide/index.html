@@ -53,7 +53,7 @@ function drawHighlights(){
 }
 function msg(s){$('message').textContent=s}
 
-// El análisis de los candidatos se hace en ide_completion.c, que lee lexer.l.
+// Los candidatos provienen únicamente del estado de la pila LL(1).
 // JavaScript se limita a ubicar, mostrar e insertar la opción seleccionada.
 const completionBox=$('completions');
 let completionItems=[], completionSelected=0, completionPrefix='', completionStart=-1;
@@ -129,7 +129,7 @@ function scheduleCompletion(){
   if(!word){closeCompletions();return;}
   completionTimer=setTimeout(async()=>{
     try{
-      const r=await request('/api/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:word.prefix})});
+      const r=await request('/api/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prefix:word.prefix,context:code.value.slice(0,word.start)})});
       const now=cursorWord();
       if(sequence!==completionSequence||!now||now.prefix!==word.prefix||now.start!==word.start)return;
       showCompletions(r.items||[],word);
@@ -173,22 +173,12 @@ function applySuggestion(s){
   if(s._source!==undefined && s._source!==code.value){
     msg('El texto cambió; vuelve a revisar antes de aplicar.');return;
   }
-  if(s.code==='APPEND_BLOCK'){
-    // No reproducir una corrección calculada antes de que el usuario editara.
-    if(rows[i].slice(s.column).trim()){
-      msg('El código cambió; vuelve a revisar la sintaxis.');return;
-    }
-    code.value=code.value.trimEnd()+'\n} :)\n';
-  }else{
-    const pos=s.column,old=s.expected??'',replacement=s.replacement??'';
-    if(pos<0||pos>rows[i].length||rows[i].slice(pos,pos+old.length)!==old){
-      msg('El código cambió; vuelve a revisar la sintaxis.');return;
-    }
-    // La propuesta en C contiene exactamente qué caracteres reemplazar;
-    // nunca añadimos una ":)" extra por nuestra cuenta.
-    rows[i]=rows[i].slice(0,pos)+replacement+rows[i].slice(pos+old.length);
-    code.value=rows.join('\n');
+  const pos=s.column,old=s.expected??'',replacement=s.replacement??'';
+  if(pos<0||pos>rows[i].length||rows[i].slice(pos,pos+old.length)!==old){
+    msg('El código cambió; vuelve a revisar la sintaxis.');return;
   }
+  rows[i]=rows[i].slice(0,pos)+replacement+rows[i].slice(pos+old.length);
+  code.value=rows.join('\n');
   clearTimeout(liveReviewTimer);++syntaxSequence;closeCompletions();
   renderIssues([]);jumpToLine(Math.min(s.line,code.value.split('\n').length));
   $('result').textContent='Corrección aplicada; requiere compilación';
