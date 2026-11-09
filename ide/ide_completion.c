@@ -1,90 +1,61 @@
-/*
- * CDFF Studio: sugerencias de palabras reservadas, implementadas en C.
- * Los candidatos se leen del archivo lexer.l REAL del proyecto.
- * No modifica el compilador ni el código que edita el usuario.
- *
- * Uso: ide_completion /ruta/proyecto-1/src/lexer.l prefijo
- * Salida TSV: palabra<TAB>tipo<TAB>explicacion_del_token
+/* Autocompletado contextual: exclusivamente FIRST(pila) de LL(1).
+ * Uso: ide_completion <prefijo> <archivo-con-texto-antes-del-cursor>
+ * Los nombres son solamente etiquetas de visualización de los terminales.
+ * La decisión de ofrecer un candidato la toma LL1_TABLE en ll1_predict.c.
  */
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-
-#define LINE_CAP 4096
-#define WORD_CAP 80
+#include "ll1_predict.h"
+#include "ide_symbols.h"
+#define MAX_SOURCE (1024u*1024u)
 #define MAX_RESULTS 12
 
-static int valid_prefix(const char *prefix) {
-    size_t n = strlen(prefix);
-    if (n < 2 || n >= WORD_CAP) return 0;
-    for (size_t i = 0; i < n; ++i) {
-        unsigned char c = (unsigned char)prefix[i];
-        if ((i == 0 && c == '#') || (c >= 'a' && c <= 'z') ||
-            (c >= 'A' && c <= 'Z') || (i > 0 && (c == '_' || isdigit(c)))) {
-            continue;
-        }
+static const struct { const char *literal; int token; } displayed_keywords[] = {
+    {"#traigase",T_TRAIGASE}, {"defina",T_DEFINA}, {"entero",T_ENTERO},
+    {"vof",T_VOF}, {"vacio",T_VACIO}, {"principal",T_PRINCIPAL},
+    {"lista",T_LISTA}, {"matriz",T_MATRIZ}, {"si",T_SI},
+    {"sino",T_SINO}, {"sinosi",T_SINOSI}, {"mientras",T_MIENTRAS},
+    {"para",T_PARA}, {"devuelva",T_DEVUELVA}, {"rompa",T_ROMPA},
+    {"verdadero",T_TRUE}, {"falso",T_FALSE}
+};
+static int valid_prefix(const char *s) {
+    size_t n=strlen(s);
+    if(n<2 || n>39) return 0;
+    for(size_t i=0;i<n;i++) {
+        unsigned char c=(unsigned char)s[i];
+        if((i==0 && c=='#') || isalpha(c) || (i && (isdigit(c)||c=='_')))continue;
         return 0;
     }
     return 1;
 }
-
-static int valid_word(const char *word) {
-    size_t n = strlen(word);
-    if (n < 2 || n >= WORD_CAP) return 0;
-    for (size_t i = 0; i < n; ++i) {
-        unsigned char c = (unsigned char)word[i];
-        if ((i == 0 && c == '#') || (c >= 'a' && c <= 'z') ||
-            (c >= 'A' && c <= 'Z') || (i > 0 && (c == '_' || isdigit(c)))) {
-            continue;
-        }
-        return 0;
+int main(int argc,char **argv) {
+    if(argc!=3 || !valid_prefix(argv[1]))return 2;
+    FILE *f=fopen(argv[2],"rb");if(!f)return 3;
+    char *context=malloc(MAX_SOURCE+1);if(!context){fclose(f);return 3;}
+    size_t len=fread(context,1,MAX_SOURCE+1,f);fclose(f);
+    if(len>MAX_SOURCE){free(context);return 3;}
+    LL1Result r;
+    int ran=ll1_analyze(context,len,&r,NULL);
+    if(!ran){free(context);return 3;}
+    if(!r.ok){free(context);return 0;} /* Nunca caer al antiguo autocompletado por prefijo. */
+    int shown=0;
+    for(size_t i=0;i<sizeof(displayed_keywords)/sizeof(displayed_keywords[0]);i++) {
+        int token=displayed_keywords[i].token;
+        const char *word=displayed_keywords[i].literal;
+        if(!ll1_expects(&r,token) || strncmp(word,argv[1],strlen(argv[1])) ||
+           !strcmp(word,argv[1]))continue;
+        printf("%s\t%s\n",word,LL1_TERMINAL_NAMES[token]);
+        if(++shown>=MAX_RESULTS)break;
     }
-    return 1;
-}
-
-/* Reconoce literales entre comillas en el inicio de una regla de Flex.
- * No analiza comentarios ni fabrica palabras ajenas al lexer real. */
-static int candidate_from_rule(const char *line, char *word) {
-    const unsigned char *p = (const unsigned char *)line;
-    while (*p == ' ' || *p == '\t') ++p;
-    if (*p++ != '"') return 0;
-    size_t used = 0;
-    while (*p && *p != '"') {
-        if (used >= WORD_CAP - 1 || *p == '\\' || *p == '\n' || *p == '\r') return 0;
-        word[used++] = (char)*p++;
+    /* Solo cuando FIRST(pila) contiene ID consultamos nombres declarados.
+     * La tabla de símbolos NUNCA genera sugerencias por sí sola. */
+    if(shown<MAX_RESULTS && ll1_expects(&r,T_ID)) {
+        IDESymbol names[MAX_RESULTS];
+        size_t n=ide_visible_symbols(context,len,argv[1],names,MAX_RESULTS-shown);
+        for(size_t i=0;i<n;i++)printf("%s\t%s\n",names[i].name,names[i].kind);
     }
-    if (*p != '"' || used == 0) return 0;
-    word[used] = '\0';
-    return valid_word(word);
-}
-
-/* Nombre público del token leído de la acción de Flex en la misma línea o
- * las siguientes, hasta una nueva regla (solo para documentación visual). */
-static void token_label(const char *line, char *out, size_t cap) {
-    const char *p = strstr(line, "return ");
-    if (!p) { snprintf(out, cap, "Palabra del lenguaje"); return; }
-    p += 7;
-    size_t i = 0;
-    while ((isupper((unsigned char)*p) || *p == '_') && i + 1 < cap) out[i++] = *p++;
-    out[i] = '\0';
-    if (i == 0) snprintf(out, cap, "Palabra del lenguaje");
-}
-
-int main(int argc, char **argv) {
-    if (argc != 3 || !valid_prefix(argv[2])) return 2;
-    FILE *f = fopen(argv[1], "r");
-    if (!f) return 3;
-    const char *prefix = argv[2];
-    size_t prefix_len = strlen(prefix);
-    char line[LINE_CAP], word[WORD_CAP], token[WORD_CAP];
-    int shown = 0;
-    while (fgets(line, sizeof line, f)) {
-        if (!candidate_from_rule(line, word)) continue;
-        if (strncmp(word, prefix, prefix_len) != 0 || !strcmp(word, prefix)) continue;
-        token_label(line, token, sizeof token);
-        printf("%s\t%s\n", word, token);
-        if (++shown >= MAX_RESULTS) break;
-    }
-    fclose(f);
+    free(context);
     return 0;
 }

@@ -1796,7 +1796,10 @@ function scheduleCompletion() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ prefix: word.prefix })
+        body: JSON.stringify({
+        prefix: word.prefix,
+        context: code.value.slice(0, word.start)
+      })
       });
 
       const current = cursorWord();

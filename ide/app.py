@@ -94,6 +94,11 @@ SYNTAX_SRC = IDE_DIR / "ide_syntax.c"
 SYNTAX_EXE = IDE_DIR / "ide_syntax"
 CLONES_SRC = IDE_DIR / "ide_clones.c"
 CLONES_EXE = IDE_DIR / "ide_clones"
+LL1_SRC = IDE_DIR / "ll1_predict.c"
+SYMBOLS_SRC = IDE_DIR / "ide_symbols.c"
+SYMBOLS_API = IDE_DIR / "ide_symbols.h"
+LL1_HEADER = IDE_DIR / "ll1_table.h"
+LL1_API = IDE_DIR / "ll1_predict.h"
 
 """
 Construye el analizador auxiliar cuando su ejecutable
@@ -102,35 +107,19 @@ Los errores de compilación se informan sin detener
 completamente el servidor del IDE.
 """
 
-def build_analyzer() -> bool:
-    """Compila solo el analizador adicional en C, sin tocar el compilador cdff."""
-    if not ANALYZER_SRC.is_file():
-        return False
-    if ANALYZER_EXE.is_file() and ANALYZER_EXE.stat().st_mtime >= ANALYZER_SRC.stat().st_mtime:
-        return True
-    try:
-        result = subprocess.run(
-            ["cc", "-std=c11", "-Wall", "-Wextra", "-O2", "-o", str(ANALYZER_EXE), str(ANALYZER_SRC)],
-            capture_output=True, text=True, timeout=15, check=False
-        )
-        if result.returncode != 0:
-            print("AVISO: no se pudo compilar el analizador C:\n" + result.stderr, flush=True)
-        return result.returncode == 0
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"AVISO: analizador C no disponible: {exc}", flush=True)
-        return False
-
+def needs_rebuild(exe: Path, *sources: Path) -> bool:
+    return not exe.is_file() or any(exe.stat().st_mtime < x.stat().st_mtime for x in sources)
 
 
 def build_completion() -> bool:
     """Compila el motor de sugerencias escrito en C (independiente de cdff)."""
     if not COMPLETION_SRC.is_file():
         return False
-    if COMPLETION_EXE.is_file() and COMPLETION_EXE.stat().st_mtime >= COMPLETION_SRC.stat().st_mtime:
+    if not needs_rebuild(COMPLETION_EXE, COMPLETION_SRC, LL1_SRC, LL1_HEADER, LL1_API, SYMBOLS_SRC, SYMBOLS_API):
         return True
     try:
         proc = subprocess.run(
-            ["cc", "-std=c11", "-Wall", "-Wextra", "-O2", "-o", str(COMPLETION_EXE), str(COMPLETION_SRC)],
+            ["cc", "-std=c11", "-Wall", "-Wextra", "-O2", "-o", str(COMPLETION_EXE), str(COMPLETION_SRC), str(LL1_SRC), str(SYMBOLS_SRC)],
             capture_output=True, text=True, timeout=15, check=False
         )
         if proc.returncode:
@@ -147,60 +136,43 @@ ejecuta la herramienta y convierte su salida en datos
 que la interfaz puede utilizar para mostrar opciones.
 """
 
-def completions_from_c(lexer: Path, prefix: object) -> list[dict]:
-    """El filtro de tokens se ejecuta en C leyendo lexer.l; Python solo comunica la respuesta."""
+def completions_from_c(prefix: object, context: object) -> list[dict]:
+    """Predicciones reales desde LL(1); no existe modo de respaldo léxico."""
     if not isinstance(prefix, str) or not re.fullmatch(r"#?[a-zA-Z][a-zA-Z_0-9]{1,39}", prefix):
         raise ValueError("Prefijo de autocompletado inválido.")
+    if not isinstance(context, str) or len(context.encode("utf-8")) > MAX_BYTES:
+        raise ValueError("El autocompletado LL(1) requiere contexto del cursor (hasta 1 MB).")
     if not COMPLETION_EXE.is_file():
-        raise RuntimeError("Motor de autocompletado en C no disponible; revise gcc/cc.")
+        raise RuntimeError("Motor de autocompletado LL(1) no disponible; revise gcc/cc.")
     try:
-        proc = subprocess.run(
-            [str(COMPLETION_EXE), str(lexer), prefix],
-            capture_output=True, text=True, timeout=3, check=False
-        )
+        with tempfile.TemporaryDirectory(prefix="cdff-ll1-") as tmp:
+            path = Path(tmp) / "cursor.e"
+            path.write_text(context, encoding="utf-8")
+            proc = subprocess.run([str(COMPLETION_EXE), prefix, str(path)],
+                                  capture_output=True, text=True, timeout=3, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError("Error al consultar el autocompletado en C.") from exc
-    if proc.returncode != 0:
-        raise RuntimeError("El autocompletado no pudo leer el lexer.l de este proyecto.")
+        raise RuntimeError("Error al consultar el autocompletado LL(1).") from exc
+    if proc.returncode:
+        raise RuntimeError("No se pudo ejecutar el predictor LL(1).")
     items = []
     for row in proc.stdout.splitlines():
-        pieces = row.split("\t", 1)
-        if len(pieces) == 2 and re.fullmatch(r"#?[a-zA-Z][a-zA-Z_0-9]{1,79}", pieces[0]):
-            items.append({"word": pieces[0], "token": pieces[1]})
+        parts = row.split("\t", 1)
+        if len(parts) == 2 and re.fullmatch(r"#?[a-zA-Z][a-zA-Z_0-9]{1,79}", parts[0]):
+            items.append({"word": parts[0], "token": parts[1]})
     return items[:12]
-
-
-def suggestions_from_c(source: Path, compiler_output: str) -> list[dict]:
-    """El algoritmo de deteccion esta en C; Python solo entrega la informacion al IDE."""
-    if not ANALYZER_EXE.is_file():
-        return []
-    try:
-        p = subprocess.run(
-            [str(ANALYZER_EXE), str(source)], input=compiler_output,
-            capture_output=True, text=True, timeout=5, check=False
-        )
-        suggestions = []
-        if p.returncode == 0:
-            for line in p.stdout.splitlines():
-                fields = line.split("\t", 3)
-                if len(fields) == 4 and fields[0].isdigit() and fields[1].isdigit() and fields[2] == "APPEND_FIN_LINEA":
-                    suggestions.append({"line": int(fields[0]), "column": int(fields[1]),
-                                        "code": fields[2], "message": fields[3]})
-        return suggestions
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-
 
 
 def build_tool(source: Path, executable: Path) -> bool:
     """Compila un analizador adicional escrito en C11. No toca cdff."""
     if not source.is_file():
         return False
-    if executable.is_file() and executable.stat().st_mtime >= source.stat().st_mtime:
+    dependencies = [source, LL1_SRC, LL1_HEADER, LL1_API] if source == SYNTAX_SRC else [source]
+    if not needs_rebuild(executable, *dependencies):
         return True
     try:
+        compilation_sources = [source, LL1_SRC] if source == SYNTAX_SRC else [source]
         p = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-O2",
-                            "-o", str(executable), str(source)],
+                            "-o", str(executable), *map(str, compilation_sources)],
                            capture_output=True, text=True, timeout=20, check=False)
         if p.returncode:
             print(f"AVISO: no pude construir {source.name}: {p.stderr}", flush=True)
@@ -234,11 +206,7 @@ def syntax_from_c(source: Path) -> list[dict]:
                           text=True, timeout=5, check=False)
     if proc.returncode:
         raise RuntimeError("El analizador sintáctico en C no pudo revisar el archivo.")
-    codes = {"APPEND_FIN_LINEA", "APPEND_RPAREN_FIN", "INSERT_RPAREN",
-             "INSERT_RPAREN_BEFORE_FIN", "INSERT_RPAREN_AFTER_COLON",
-             "INSERT_COLON_BEFORE_RPAREN", "INSERT_RBRACE_BEFORE_FIN",
-             "REPLACE_ORPHAN_COLON_WITH_BLOCK", "REPLACE_ORPHAN_RPAREN_WITH_BLOCK",
-             "APPEND_BLOCK", "REMOVE_ORPHAN_FIN_LINEA", "NO_FIX"}
+    codes = {"LL1_INSERT", "LL1_REPLACE", "NO_FIX"}
     result = []
     # C cuenta offsets en bytes UTF-8 y el textarea usa índices UTF-16.
     # Convertimos exclusivamente la columna para no desplazar las ediciones
@@ -472,7 +440,8 @@ def handler_factory(src: Path):
             try:
                 data = read_json(self)
                 if url.path == "/api/complete":
-                    self.send_json({"items": completions_from_c(src / "lexer.l", data.get("prefix"))})
+                    self.send_json({"items": completions_from_c(
+                        data.get("prefix"), data.get("context"))})
                     return
                 if url.path == "/api/clones":
                     self.send_json(clones_from_c(src, data.get("include_examples") is True))
@@ -560,7 +529,6 @@ def main():
     src = args.src.expanduser().resolve()
     if not (src / "lexer.l").is_file() or not (src / "parser.y").is_file():
         ap.error(f"No encuentro el compilador en {src}. Pase --src /ruta/proyecto-1/src")
-    build_analyzer()
     build_completion()
     build_tool(SYNTAX_SRC, SYNTAX_EXE)
     build_tool(CLONES_SRC, CLONES_EXE)
