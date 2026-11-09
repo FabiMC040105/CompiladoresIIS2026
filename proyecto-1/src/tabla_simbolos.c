@@ -482,12 +482,8 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
     Ambito *ambito_funcion;
     unsigned long long siguiente_global = 0;
 
-    /* Calcula el espacio de pila disponible y descuenta su cabecera reservada. */
-    const unsigned long long CAPACIDAD_PILA =
-        (unsigned long long)MEMORIA_TOTAL_BYTES - LIMITE_PILA;
-
-    const unsigned long long MAXIMO_LOCALES =
-        CAPACIDAD_PILA - TAMANO_CABECERA;
+    /* El espacio para frames depende del final real de las globales. */
+    unsigned long long maximo_locales;
 
     if (tabla == NULL || tabla->ambito_global == NULL)
         return TS_ERROR_ARGUMENTO;
@@ -530,8 +526,8 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
         if (!ts_calcular_bytes_simbolo(actual, &bytes))
             return TS_ERROR_ARGUMENTO;
 
-        if (siguiente_global > LIMITE_GLOBALES ||
-            bytes > LIMITE_GLOBALES - siguiente_global)
+        if (siguiente_global > MEMORIA_TOTAL_BYTES ||
+            bytes > MEMORIA_TOTAL_BYTES - siguiente_global)
         {
             return TS_ERROR_MEMORIA;
         }
@@ -569,6 +565,9 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
     }
 
     tabla->siguiente_direccion_global = (long)siguiente_global;
+
+    /* No reservar regiones fijas: los frames solo pueden usar lo libre. */
+    maximo_locales = (unsigned long long)MEMORIA_TOTAL_BYTES - siguiente_global;
 
     /*
      * PASO 4.
@@ -687,19 +686,11 @@ ResultadoTS ts_asignar_direcciones_globales(TablaSimbolos *tabla)
 
             if (!ts_calcular_bytes_simbolo(simbolo, &bytes))
                 return TS_ERROR_ARGUMENTO;
-            /*
-            * La pila ocupa desde LIMITE_PILA hasta MEMORIA_TOTAL_BYTES.
-            * Su capacidad es de 32768 bytes.
-            *
-            * El marco incluye:
-            * - Variables locales.
-            * - 8 bytes para FP anterior y direccion de retorno.
-            *
-            * tamano_marco guarda solo el espacio de variables locales.
-            */
-
-            if (bytes > MAXIMO_LOCALES ||
-                espacio_local > MAXIMO_LOCALES - bytes)
+            /* Los locales se reservan en el frame; la cabecera se
+             * comprueba por separado cuando se genera una llamada.
+             * La comprobacion runtime evita colisiones entre frames. */
+            if (bytes > maximo_locales ||
+                espacio_local > maximo_locales - bytes)
             {
                 return TS_ERROR_MEMORIA;
             }

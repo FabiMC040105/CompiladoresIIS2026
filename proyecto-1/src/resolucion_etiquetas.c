@@ -294,6 +294,130 @@ formato_invalido:
 }
 
 /*
+ * Relajacion de saltos condicionales en Fase 5.
+ * Se ejecuta DESPUES de calendarizar dependencias: no introduce operandos
+ * nuevos, solamente BRU. Por ello no necesita modificar el scheduler.
+ *
+ * BEQ/BNE fuera de rango: invertir condicion y saltar sobre un JMP largo.
+ * BGE/BLE fuera de rango: no hay inversa estricta en esta ISA. Se usa
+ * un trampolin corto, un JMP para el camino falso y otro al destino largo.
+ *
+ * Cada expansion cambia las direcciones de bundles posteriores. Por eso
+ * se vuelven a construir etiquetas y offsets y se repite hasta converger.
+ */
+static int reanalizar_programa(ProgramaASM *p, TablaEtiquetas **tabla, FILE *err)
+{
+    TablaEtiquetas *nueva = etq_crear();
+    size_t i;
+    if (nueva == NULL) return 0;
+    p->bundles = 0;
+    for (i = 0; i < p->cantidad; ++i) {
+        LineaASM *l = &p->lineas[i];
+        l->tiene_referencia = 0;
+        l->inicio_referencia = 0;
+        l->fin_referencia = 0;
+        l->bundle = 0;
+        if (analizar_linea(p, nueva, l, i + 1, err) < 0) {
+            etq_destruir(nueva);
+            return 0;
+        }
+    }
+    etq_destruir(*tabla);
+    *tabla = nueva;
+    return 1;
+}
+
+static int linea_generada(ProgramaASM *p, const char *texto)
+{
+    return agregar_linea(p, texto);
+}
+
+static int expandir_branch_largo(ProgramaASM *p, const TablaEtiquetas *tabla,
+                                 const ReferenciaSalto *ref,
+                                 unsigned identificador, FILE *err)
+{
+    ProgramaASM nuevo = {0};
+    char instruccion[16], continuacion[80], trampolin[80];
+    char buf[256];
+    int r1, r2, escrito = 0;
+    size_t i;
+    const char *inverso = NULL;
+
+    snprintf(continuacion, sizeof(continuacion),
+             "__branch_largo_fin_%u", identificador);
+    snprintf(trampolin, sizeof(trampolin),
+             "__branch_largo_tramp_%u", identificador);
+    if (etq_buscar_etiqueta(tabla, continuacion) != NULL ||
+        etq_buscar_etiqueta(tabla, trampolin) != NULL) {
+        fprintf(err, "Fase 5: colision con etiquetas internas de salto largo\n");
+        return 0;
+    }
+
+    for (i = 0; i < p->cantidad; ++i) {
+        LineaASM *linea = &p->lineas[i];
+        if (!(linea->tiene_referencia && linea->bundle == ref->bundle_origen)) {
+            if (!linea_generada(&nuevo, linea->texto)) goto fallo;
+            continue;
+        }
+        if (escrito || sscanf(sin_espacios(linea->texto),
+                             "BRU: %15s x%d, x%d,", instruccion,
+                             &r1, &r2) != 3) goto fallo;
+        escrito = 1;
+        if (!strcmp(instruccion, "BEQ")) inverso = "BNE";
+        else if (!strcmp(instruccion, "BNE")) inverso = "BEQ";
+        else if (strcmp(instruccion, "BGE") && strcmp(instruccion, "BLE"))
+            goto fallo;
+
+        if (inverso != NULL) {
+            snprintf(buf, sizeof(buf), "BRU: %s x%d, x%d, %s\n",
+                     inverso, r1, r2, continuacion);
+            if (!linea_generada(&nuevo, buf)) goto fallo;
+            snprintf(buf, sizeof(buf), "BRU: JMP %s\n", ref->destino);
+            if (!linea_generada(&nuevo, buf)) goto fallo;
+        } else {
+            snprintf(buf, sizeof(buf), "BRU: %s x%d, x%d, %s\n",
+                     instruccion, r1, r2, trampolin);
+            if (!linea_generada(&nuevo, buf)) goto fallo;
+            snprintf(buf, sizeof(buf), "BRU: JMP %s\n", continuacion);
+            if (!linea_generada(&nuevo, buf)) goto fallo;
+            snprintf(buf, sizeof(buf), "%s:\n", trampolin);
+            if (!linea_generada(&nuevo, buf)) goto fallo;
+            snprintf(buf, sizeof(buf), "BRU: JMP %s\n", ref->destino);
+            if (!linea_generada(&nuevo, buf)) goto fallo;
+        }
+        snprintf(buf, sizeof(buf), "%s:\n", continuacion);
+        if (!linea_generada(&nuevo, buf)) goto fallo;
+    }
+    if (!escrito) goto fallo;
+    liberar_programa(p);
+    *p = nuevo;
+    return 1;
+fallo:
+    liberar_programa(&nuevo);
+    fprintf(err, "Fase 5: no se pudo expandir branch condicional largo\n");
+    return 0;
+}
+
+static const ReferenciaSalto *branch_condicional_fuera_rango(
+    const TablaEtiquetas *tabla)
+{
+    const ReferenciaSalto *ref;
+    for (ref = tabla->primera_referencia; ref != NULL; ref = ref->siguiente) {
+        const Etiqueta *destino;
+        int64_t off;
+        if (ref->tipo != ETQ_BEQ && ref->tipo != ETQ_BNE &&
+            ref->tipo != ETQ_BGE && ref->tipo != ETQ_BLE)
+            continue;
+        destino = etq_buscar_etiqueta(tabla, ref->destino);
+        if (destino == NULL) continue;
+        off = ((int64_t)destino->indice_bundle -
+               (int64_t)ref->bundle_origen) * ETQ_BYTES_POR_BUNDLE;
+        if (off < -2048 || off > 2047) return ref;
+    }
+    return NULL;
+}
+
+/*
     RESOLUCION DE ETIQUETAS - FASE 5
     Lee el ensamblador con etiquetas, registra sus posiciones y resuelve
     los destinos de saltos en offsets relativos medidos en bytes.
@@ -360,6 +484,22 @@ int resolver_etiquetas_asm(const char *entrada, const char *salida, FILE *report
     de origen y debe respetar el rango de la instruccion del ISA.
 */
     r = etq_resolver(tabla, programa.bundles);
+    {
+        unsigned expansiones = 0;
+        while (r == ETQ_ERROR_OFFSET_FUERA_RANGO) {
+            const ReferenciaSalto *lejano = branch_condicional_fuera_rango(tabla);
+            if (lejano == NULL) break; /* JMP o ADDI-PC: error real. */
+            if (!expandir_branch_largo(&programa, tabla, lejano,
+                                       expansiones++, err) ||
+                !reanalizar_programa(&programa, &tabla, err))
+                goto limpieza;
+            r = etq_resolver(tabla, programa.bundles);
+        }
+        if (reporte != NULL && expansiones != 0)
+            fprintf(reporte,
+                    "Fase 5: %u branches largos expandidos con JMP\n",
+                    expansiones);
+    }
 /*
     Si la resolucion falla, muestra las referencias problematicas.
     En particular indica destinos inexistentes y saltos cuyo offset

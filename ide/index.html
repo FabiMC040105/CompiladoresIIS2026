@@ -1,0 +1,2207 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CDFF Studio</title>
+
+<style>
+:root {
+  --bg: #f7f4fc;
+  --panel: #ffffff;
+  --border: #e7def1;
+  --text: #302747;
+  --muted: #817392;
+  --accent: #8055d8;
+  --editor: #1b192b;
+  --font-code: Consolas, Monaco, "Courier New", monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px system-ui, "Segoe UI", sans-serif;
+}
+
+header {
+  min-height: 65px;
+  padding: 15px 26px;
+  background: linear-gradient(110deg, #1b1629, #38254d);
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+}
+
+header strong {
+  font-size: 21px;
+  letter-spacing: -.6px;
+}
+
+#status { font-size: 12px; color: #d0c2e1; }
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e7a0a0;
+  margin-right: 7px;
+}
+
+.dot.ready { background: #7ee2bb; }
+
+.shell {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  min-height: calc(100vh - 65px);
+}
+
+aside {
+  padding: 23px 15px;
+  background: #fcfaff;
+  border-right: 1px solid var(--border);
+}
+
+aside h3 {
+  margin: 14px 7px;
+  color: #8b68b9;
+  font-size: 11px;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+}
+
+.file {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file:hover { background: #eee6fb; }
+
+main {
+  padding: 23px;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+#filename {
+  height: 43px;
+  width: 180px;
+  padding: 0 13px;
+  border: 1px solid #dfd4ee;
+  border-radius: 11px;
+  background: white;
+  color: var(--text);
+  font: 600 14px system-ui;
+}
+
+.btn {
+  min-height: 43px;
+  padding: 10px 15px;
+  border: 1px solid #dfd4ee;
+  border-radius: 11px;
+  background: white;
+  color: #4c356b;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.btn:hover { filter: brightness(.97); }
+
+.btn.primary {
+  background: linear-gradient(135deg, #9567ef, #7247d1);
+  color: white;
+  border-color: #8055d8;
+  box-shadow: 0 5px 14px #8055d833;
+}
+
+.btn.secondary {
+  background: #f0eaff;
+  color: #6c43b9;
+  border-color: #ded0ff;
+}
+
+.live-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #705d87;
+}
+
+.live-switch input { accent-color: #8055d8; }
+
+.pill {
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: #eee7fa;
+  color: #72539b;
+  font-size: 12px;
+}
+
+.window {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 8px 25px #3b255b0b;
+}
+
+.window-label {
+  padding: 13px 18px;
+  background: #fdfbff;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#counter, #result {
+  font-size: 12px;
+  font-weight: 400;
+  color: #89779f;
+}
+
+.editor-wrap {
+  position: relative;
+  display: flex;
+  height: 55vh;
+  min-height: 390px;
+  background: var(--editor);
+  overflow: hidden;
+}
+
+#gutter {
+  flex: 0 0 54px;
+  padding: 16px 11px 16px 7px;
+  background: #211e33;
+  color: #847895;
+  border-right: 1px solid #39334b;
+  text-align: right;
+  font: 14px/24px var(--font-code);
+  white-space: pre;
+  overflow: hidden;
+  user-select: none;
+}
+
+#gutter .err { color: #ff8fa5; font-weight: bold; }
+
+.editor-code-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#syntaxLayer, #code {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  font: 14px/24px var(--font-code);
+  font-weight: 400;
+  letter-spacing: 0;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+  overflow-wrap: normal;
+  word-wrap: normal;
+}
+
+#syntaxLayer {
+  z-index: 1;
+  pointer-events: none;
+  color: #eee8f7;
+  scrollbar-width: none;
+}
+
+#syntaxLayer::-webkit-scrollbar { display: none; }
+
+#code {
+  z-index: 2;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: white;
+}
+
+#code::selection {
+  background: #8e6ac766;
+}
+
+#code::placeholder {
+  -webkit-text-fill-color: #857b99;
+}
+
+.cdff-keyword { color: #c7a2ff; }
+.cdff-type { color: #68d9ee; }
+.cdff-function { color: #f8d58e; }
+.cdff-variable { color: #eee8fa; }
+.cdff-number { color: #ffb37d; }
+.cdff-operator { color: #f57bb5; }
+.cdff-terminator { color: #75e2bf; }
+.cdff-punctuation { color: #b9b1c9; }
+.cdff-boolean { color: #e9a5f4; }
+.cdff-string { color: #a5dda9; }
+.cdff-comment { color: #819b93; }
+.cdff-directive { color: #d4a5ff; }
+
+
+#lineHighlights {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+
+.highlight-error {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background: #ff61721c;
+  border-left: 3px solid #ff7c9a;
+}
+
+.completions {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  min-width: 230px;
+  max-width: 330px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 5px;
+  background: #29243d;
+  border: 1px solid #604c80;
+  border-radius: 11px;
+  box-shadow: 0 12px 30px #120b25a0;
+}
+
+.completions.visible { display: block; }
+
+.completion-opt {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #f1e9fc;
+  text-align: left;
+  cursor: pointer;
+  font: 13px var(--font-code);
+}
+
+.completion-opt.selected,
+.completion-opt:hover { background: #503a76; }
+
+.completion-opt small { color: #c5b2dd; }
+
+.completion-help {
+  padding: 9px;
+  color: #c2b0d8;
+  font-size: 11px;
+  border-top: 1px solid #514363;
+}
+
+.output { margin-top: 16px; }
+
+.output pre {
+  margin: 0;
+  padding: 17px;
+  min-height: 90px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: #423551;
+  font: 12px/1.6 var(--font-code);
+}
+
+.errorlist {
+  padding: 0 18px 12px 35px;
+  color: #ad4860;
+  font-size: 12px;
+}
+
+.errorlist li {
+  margin: 8px 0;
+  cursor: pointer;
+}
+
+.fix-btn {
+  margin-left: 10px;
+  padding: 5px 9px;
+  border: 1px solid #e6bad1;
+  border-radius: 7px;
+  background: #fff0f7;
+  color: #9a426f;
+  cursor: pointer;
+}
+
+.clones-top {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+}
+
+.clones-top label { font-size: 12px; }
+
+#cloneResults {
+  padding: 0 18px 15px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.clone-entry {
+  padding: 11px;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #faf7ff;
+  line-height: 1.8;
+}
+
+.clone-entry button {
+  border: 0;
+  background: none;
+  color: #7549c0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media(max-width: 720px) {
+  .shell { grid-template-columns: 1fr; }
+  aside { display: none; }
+  main { padding: 12px; }
+  .editor-wrap { height: 55vh; }
+}
+
+
+/* Resultados de compilacion */
+
+.result-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.result-tab {
+  padding: 9px 15px;
+  border: 1px solid #e3d7f2;
+  border-radius: 9px;
+  background: #f7f2ff;
+  color: #7655a5;
+  font: 600 12px system-ui;
+  cursor: pointer;
+}
+
+.result-tab.active {
+  background: #8055d8;
+  border-color: #8055d8;
+  color: white;
+}
+
+.result-panel {
+  padding: 16px;
+}
+
+.result-panel[hidden] {
+  display: none;
+}
+
+.artifact-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.artifact-title {
+  font-weight: 650;
+  color: #4b356c;
+}
+
+.output pre.artifact-code {
+  max-height: 380px;
+  min-height: 120px;
+  overflow: auto;
+  padding: 17px;
+  border-radius: 11px;
+  background: #1b192b;
+  color: #eee8f7;
+  font: 12px/1.7 var(--font-code);
+  white-space: pre;
+  tab-size: 4;
+}
+
+.artifact-empty {
+  padding: 20px 4px;
+  color: #817392;
+  font-size: 13px;
+}
+
+
+/* ERRORES DEL EDITOR */
+
+/* Subrayado rojo debajo del fragmento con error */
+.error-underline {
+    position: absolute;
+    height: 24px;
+    pointer-events: none;
+    box-sizing: border-box;
+    z-index: 5;
+
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 12 6'%3E%3Cpath d='M0 3 Q3 0 6 3 T12 3' fill='none' stroke='%23ff4769' stroke-width='2.2'/%3E%3C/svg%3E");
+    background-repeat: repeat-x;
+    background-position: left bottom;
+}
+
+/* Resaltado de toda la línea que contiene un error */
+.error-line-mark {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 24px;
+    pointer-events: none;
+    box-sizing: border-box;
+    z-index: 0;
+
+    background: rgba(255, 71, 105, 0.10);
+    border-left: 3px solid #ff4769;
+}
+
+.output pre.artifact-code[hidden] {
+  display: none;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+
+</style>
+</head>
+
+<body>
+
+<header>
+  <strong>CDFF Studio</strong>
+  <span id="status">
+    <span class="dot"></span>Conectando…
+  </span>
+</header>
+
+<div class="shell">
+<aside>
+  <h3>Mis archivos</h3>
+  <div id="saved"></div>
+
+  <h3>Ejemplos</h3>
+  <div id="examples"></div>
+
+</aside>
+
+<main>
+  <div class="toolbar">
+    <input id="filename" value="programa.e"
+           aria-label="Nombre del archivo" spellcheck="false">
+
+    <button id="new" class="btn">Nuevo</button>
+    <button id="save" class="btn">Guardar · Ctrl+S</button>
+    <button id="compile" class="btn primary">
+      ▶ Compilar · Ctrl+Enter
+    </button>
+    <button id="check" class="btn secondary">
+      Revisar sintaxis
+    </button>
+
+    <label class="live-switch">
+      <input id="liveReview" type="checkbox" checked>
+      Sugerencias en vivo
+    </label>
+
+    <span id="message" class="pill">Editor preparado</span>
+  </div>
+
+  <div class="window">
+    <div class="window-label">
+      <span>Editor de código</span>
+      <span id="counter">Línea 1 · Columna 1</span>
+    </div>
+
+    <div class="editor-wrap">
+      <div id="gutter">1</div>
+
+      <div class="editor-code-area">
+        <pre id="syntaxLayer" aria-hidden="true"></pre>
+        <div id="lineHighlights"></div>
+
+        <textarea
+          id="code"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          aria-label="Código CDFF"
+          aria-autocomplete="list"
+          aria-controls="completions"
+        ></textarea>
+      </div>
+
+      <div id="completions" class="completions"
+           role="listbox"></div>
+    </div>
+  </div>
+
+  <section class="output window">
+    <div class="window-label">
+      <span>Salida del compilador</span>
+      <span id="result">Sin ejecutar</span>
+    </div>
+
+    <pre id="console">La salida aparecerá aquí.</pre>
+    <ol id="errors" class="errorlist"></ol>
+  </section>
+
+  
+<section class="output window" id="artifactsSection">
+  <div class="window-label">
+    <span>Resultados de compilación</span>
+    <span id="artifactStatus">Sin archivos</span>
+  </div>
+
+  <div class="result-tabs">
+    <button class="result-tab active"
+            data-panel="asmPanel">
+      Ensamblador
+    </button>
+
+    <button class="result-tab"
+            data-panel="binPanel">
+      Binario
+    </button>
+
+    <button class="result-tab"
+            data-panel="irPanel">
+      Representación intermedia
+    </button>
+  </div>
+
+  <div id="asmPanel" class="result-panel">
+    <div class="artifact-toolbar">
+      <span class="artifact-title">Archivo .asm</span>
+      <button id="downloadAsm" class="btn secondary"
+              disabled>
+        Descargar .asm
+      </button>
+    </div>
+
+    <div id="asmEmpty" class="artifact-empty">
+      Compila un archivo para ver el ensamblador.
+    </div>
+
+    <pre id="asmContent" class="artifact-code"
+         hidden></pre>
+  </div>
+
+  <div id="binPanel" class="result-panel" hidden>
+    <div class="artifact-toolbar">
+      <span class="artifact-title">Archivo .bin</span>
+      <button id="downloadBin" class="btn secondary"
+              disabled>
+        Descargar .bin
+      </button>
+    </div>
+
+    <div id="binEmpty" class="artifact-empty">
+      Compila un archivo para ver su contenido binario.
+    </div>
+
+    <pre id="binContent" class="artifact-code"
+         hidden></pre>
+  </div>
+
+  <div id="irPanel" class="result-panel" hidden>
+    <div class="artifact-toolbar">
+      <span class="artifact-title">
+        Código de tres direcciones
+      </span>
+    </div>
+
+    <div id="irEmpty" class="artifact-empty">
+      No hay representación intermedia disponible.
+    </div>
+
+    <pre id="irContent" class="artifact-code"
+         hidden></pre>
+  </div>
+</section>
+
+  <section class="output window">
+    <div class="window-label">Detector de clones</div>
+
+    <div class="clones-top">
+      <button id="clones" class="btn secondary">
+        Buscar clones
+      </button>
+
+      <label>
+        <input id="includeExamples" type="checkbox">
+        Incluir ejemplos
+      </label>
+    </div>
+
+    <div id="cloneResults">Sin analizar.</div>
+  </section>
+</main>
+</div>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+
+const code = $("code");
+const gutter = $("gutter");
+const syntaxLayer = $("syntaxLayer");
+const completionBox = $("completions");
+
+let errors = [];
+let suggestions = [];
+let completionItems = [];
+let completionSelected = 0;
+let completionWord = null;
+let completionTimer = null;
+let completionSequence = 0;
+let syntaxSequence = 0;
+let liveReviewTimer = null;
+let semanticTokens = [];
+
+
+/* Resultados del compilador */
+
+let generatedArtifacts = [];
+
+function resetArtifacts() {
+  generatedArtifacts = [];
+
+  $("artifactStatus").textContent = "Sin archivos";
+
+  for (const kind of ["Asm", "Bin"]) {
+    $("download" + kind).disabled = true;
+    $(kind.toLowerCase() + "Content").hidden = true;
+    $(kind.toLowerCase() + "Content").textContent = "";
+    $(kind.toLowerCase() + "Empty").hidden = false;
+  }
+
+  $("irContent").hidden = true;
+  $("irContent").textContent = "";
+  $("irEmpty").hidden = false;
+}
+
+function showResultTab(panelId) {
+  document.querySelectorAll(".result-panel").forEach(
+    panel => {
+      panel.hidden = panel.id !== panelId;
+    }
+  );
+
+  document.querySelectorAll(".result-tab").forEach(
+    button => {
+      button.classList.toggle(
+        "active",
+        button.dataset.panel === panelId
+      );
+    }
+  );
+}
+
+document.querySelectorAll(".result-tab").forEach(
+  button => {
+    button.addEventListener("click", () => {
+      showResultTab(button.dataset.panel);
+    });
+  }
+);
+
+function artifactUrl(name, download = false) {
+  return "/api/artifact?name=" +
+    encodeURIComponent(name) +
+    (download ? "&download=1" : "");
+}
+
+function downloadArtifact(extension) {
+  const name = generatedArtifacts.find(
+    item => item.endsWith("." + extension)
+  );
+
+  if (!name) return;
+
+  const link = document.createElement("a");
+  link.href = artifactUrl(name, true);
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+$("downloadAsm").onclick = () => downloadArtifact("asm");
+$("downloadBin").onclick = () => downloadArtifact("bin");
+
+
+/**
+ * Aquí se cargan los archivos generados por el compilador
+ * Permite visualizar el ensamblador y la representación hexadecimal del archivo .bin
+ * También se habilitan sus botones de descarga
+ */
+
+async function loadArtifacts(names) {
+  resetArtifacts();
+
+  generatedArtifacts = names.filter(
+    name => /^[a-zA-Z0-9_-]+\.(asm|bin)$/.test(name)
+  );
+
+  if (!generatedArtifacts.length) return;
+
+  $("artifactStatus").textContent =
+    generatedArtifacts.length + " archivo(s)";
+
+  for (const extension of ["asm", "bin"]) {
+    const name = generatedArtifacts.find(
+      item => item.endsWith("." + extension)
+    );
+
+    if (!name) continue;
+
+    const data = await request(artifactUrl(name));
+
+    $(extension + "Content").textContent = data.content;
+    $(extension + "Content").hidden = false;
+    $(extension + "Empty").hidden = true;
+
+    $("download" + extension.toUpperCase()[0] +
+      extension.slice(1)).disabled = false;
+  }
+}
+
+/**
+ * Punto de integración para la representación intermedia del compilador
+ * Permite mostrar el IR en su pestaña sin modificar la lógica principal del editor.
+ */
+window.CDFFResults = {
+  showIR(text) {
+    $("irContent").textContent = String(text || "");
+    $("irContent").hidden = !text;
+    $("irEmpty").hidden = !!text;
+
+    if (text) showResultTab("irPanel");
+  },
+
+  clearIR() {
+    $("irContent").textContent = "";
+    $("irContent").hidden = true;
+    $("irEmpty").hidden = false;
+  }
+};
+
+
+// COLORES DEL LENGUAJE CDFF
+
+const keywords = new Set([
+  "defina", "si", "sino", "sinosi",
+  "mientras", "para", "devuelva", "rompa"
+]);
+
+const types = new Set([
+  "entero", "vof", "vacio", "lista", "matriz"
+]);
+
+const booleans = new Set([
+  "verdadero", "falso"
+]);
+
+const validKinds = new Set([
+  "keyword", "type", "function", "variable",
+  "number", "boolean", "string", "comment",
+  "operator", "directive", "punctuation",
+  "terminator"
+]);
+
+function token(kind, text) {
+  const span = document.createElement("span");
+  span.className = "cdff-" + kind;
+  span.textContent = text;
+  return span;
+}
+
+function semanticKind(start, end) {
+  const found = semanticTokens.find(
+    t => t.start === start && t.end === end
+  );
+
+  return found && validKinds.has(found.kind)
+    ? found.kind : null;
+}
+
+// Se aplican los colores de sintaxis del lenguaje CDFF
+function highlightSyntax() {
+  const source = code.value;
+  const fragment = document.createDocumentFragment();
+
+  let i = 0;
+
+  while (i < source.length) {
+    const start = i;
+
+    // Comentarios de bloque
+    if (source.startsWith("^^", i)) {
+      const end = source.indexOf("^^", i + 2);
+      i = end === -1 ? source.length : end + 2;
+
+      fragment.append(
+        token("comment", source.slice(start, i))
+      );
+      continue;
+    }
+
+    // Comentarios de línea
+    if (source[i] === "^") {
+      const end = source.indexOf("\n", i);
+      i = end === -1 ? source.length : end;
+
+      fragment.append(
+        token("comment", source.slice(start, i))
+      );
+      continue;
+    }
+
+    // Cadenas
+    if (source[i] === '"') {
+      i++;
+
+      while (i < source.length) {
+        if (source[i] === "\\") {
+          i = Math.min(i + 2, source.length);
+          continue;
+        }
+
+        if (source[i] === '"') {
+          i++;
+          break;
+        }
+
+        if (source[i] === "\n") break;
+        i++;
+      }
+
+      fragment.append(
+        token("string", source.slice(start, i))
+      );
+      continue;
+    }
+
+    // Importaciones
+    if (
+      source.startsWith("#traigase", i) &&
+      !/[a-zA-Z_0-9]/.test(source[i + 9] || "")
+    ) {
+      i += 9;
+
+      fragment.append(
+        token("directive", source.slice(start, i))
+      );
+      continue;
+    }
+
+    // Fin de instrucción
+    if (source.startsWith(":)", i)) {
+      i += 2;
+      fragment.append(token("terminator", ":)"));
+      continue;
+    }
+
+    // Números
+    if (/[0-9]/.test(source[i])) {
+      i++;
+
+      while (
+        i < source.length &&
+        /[0-9]/.test(source[i])
+      ) {
+        i++;
+      }
+
+      fragment.append(
+        token(
+          semanticKind(start, i) || "number",
+          source.slice(start, i)
+        )
+      );
+      continue;
+    }
+
+    // Identificadores y palabras reservadas
+    if (/[a-z]/.test(source[i])) {
+      i++;
+
+      while (
+        i < source.length &&
+        /[a-zA-Z_0-9]/.test(source[i])
+      ) {
+        i++;
+      }
+
+      const word = source.slice(start, i);
+      let kind = "variable";
+
+      if (keywords.has(word)) {
+        kind = "keyword";
+      } else if (types.has(word)) {
+        kind = "type";
+      } else if (booleans.has(word)) {
+        kind = "boolean";
+      } else if (
+        word === "principal" ||
+        /^\s*\(/.test(source.slice(i))
+      ) {
+        kind = "function";
+      }
+
+      fragment.append(
+        token(semanticKind(start, i) || kind, word)
+      );
+      continue;
+    }
+
+    // Operadores
+    const multi = [
+      "**", "==", "!=", "<=", ">=", "$$", "--"
+    ].find(op => source.startsWith(op, i));
+
+    if (multi) {
+      i += multi.length;
+      fragment.append(token("operator", multi));
+      continue;
+    }
+
+    if ("+-*/%=<>".includes(source[i])) {
+      i++;
+      fragment.append(
+        token("operator", source.slice(start, i))
+      );
+      continue;
+    }
+
+    // Delimitadores
+    if ("{}()[],".includes(source[i])) {
+      i++;
+      fragment.append(
+        token("punctuation", source.slice(start, i))
+      );
+      continue;
+    }
+
+    // Espacios y otros caracteres
+    i++;
+    fragment.append(
+      document.createTextNode(source.slice(start, i))
+    );
+  }
+
+  if (source.endsWith("\n")) {
+    fragment.append(document.createTextNode(" "));
+  }
+
+  syntaxLayer.replaceChildren(fragment);
+  syncScroll();
+}
+
+function syncScroll() {
+  syntaxLayer.scrollTop = code.scrollTop;
+  syntaxLayer.scrollLeft = code.scrollLeft;
+  gutter.scrollTop = code.scrollTop;
+}
+
+window.CDFFHighlight = {
+  refresh: highlightSyntax,
+
+  setSemanticTokens(tokens) {
+    semanticTokens = Array.isArray(tokens) ? tokens : [];
+    highlightSyntax();
+  },
+
+  clearSemanticTokens() {
+    semanticTokens = [];
+    highlightSyntax();
+  }
+};
+
+// Actualiza la presentación del editor
+// Se sincronizan los números de línea, la posición del cursor, los colores de sintaxis y las marcas de error
+
+function redraw() {
+  const rows = code.value.split("\n");
+
+  gutter.replaceChildren();
+
+  rows.forEach((_, i) => {
+    if (i > 0) gutter.append("\n");
+
+    const number = document.createElement("span");
+    number.textContent = i + 1;
+
+    if (errors.includes(i + 1)) {
+      number.className = "err";
+    }
+
+    gutter.append(number);
+  });
+
+  const before = code.value.slice(0, code.selectionStart);
+  const line = before.split("\n").length;
+  const column = before.length -
+    before.lastIndexOf("\n");
+
+  $("counter").textContent =
+    `Línea ${line} · Columna ${column}`;
+
+  highlightSyntax();
+  drawErrors();
+}
+
+
+
+// Dibuja los indicadores visuales de errores
+
+function drawErrors() {
+    const layer = $("lineHighlights");
+    layer.replaceChildren();
+
+    // Obtiene las medidas reales del editor
+    const style = getComputedStyle(code);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    context.font = style.font;
+
+    const charWidth = context.measureText("M").width;
+    const lineHeight = parseFloat(style.lineHeight) || 24;
+    const paddingLeft = parseFloat(style.paddingLeft) || 16;
+    const paddingTop = parseFloat(style.paddingTop) || 16;
+
+    const lines = code.value.split("\n");
+
+    // Reune las líneas con errores, tengan o no una sugerencia de corrección asociada
+    const markedLines = new Set();
+
+    for (const line of errors) {
+        const number = Number(line);
+
+        if (
+            Number.isInteger(number) &&
+            number >= 1 &&
+            number <= lines.length
+        ) {
+            markedLines.add(number);
+        }
+    }
+
+    for (const issue of suggestions) {
+        const number = Number(issue.line);
+
+        if (
+            Number.isInteger(number) &&
+            number >= 1 &&
+            number <= lines.length
+        ) {
+            markedLines.add(number);
+        }
+    }
+
+    // Resalta el fondo de cada línea
+    for (const line of markedLines) {
+        const top =
+            paddingTop +
+            (line - 1) * lineHeight -
+            code.scrollTop;
+
+        if (
+            top < -lineHeight ||
+            top > code.clientHeight
+        ) {
+            continue;
+        }
+
+        const mark = document.createElement("div");
+
+        mark.className = "error-line-mark";
+        mark.style.top = top + "px";
+        mark.style.height = lineHeight + "px";
+
+        layer.append(mark);
+    }
+
+    // Subraya las posiciones específicas
+    for (const issue of suggestions) {
+        const line = Number(issue.line);
+        const column = Number(issue.column);
+
+        if (
+            !Number.isInteger(line) ||
+            !Number.isInteger(column) ||
+            line < 1 ||
+            line > lines.length ||
+            column < 0 ||
+            column > lines[line - 1].length
+        ) {
+            continue;
+        }
+
+        const top =
+            paddingTop +
+            (line - 1) * lineHeight -
+            code.scrollTop;
+
+        if (
+            top < -lineHeight ||
+            top > code.clientHeight
+        ) {
+            continue;
+        }
+
+        const left =
+            paddingLeft +
+            column * charWidth -
+            code.scrollLeft;
+
+        const expected = String(issue.expected || "");
+        const replacement = String(issue.replacement || "");
+
+        // Cuando no existe texto original, marca una pequeña zona donde falta el elemento
+        const length = expected.length > 0
+            ? expected.length
+            : Math.max(2, replacement.length);
+
+        const mark = document.createElement("div");
+
+        mark.className = "error-underline";
+        mark.style.top = (top - 1) + "px";
+        mark.style.left = left + "px";
+        mark.style.width =
+            Math.max(18, length * charWidth) + "px";
+
+        // Conserva la descripción del diagnóstico
+        if (issue.message) {
+            mark.title = String(issue.message);
+        }
+
+        layer.append(mark);
+    }
+}
+
+function message(text) {
+  $("message").textContent = text;
+}
+
+function changed() {
+  syntaxSequence++;
+  semanticTokens = [];
+
+  if (errors.length) {
+    errors = [];
+    suggestions = [];
+    $("errors").replaceChildren();
+    $("result").textContent = "Sin compilar";
+  }
+
+  redraw();
+  scheduleCompletion();
+  scheduleLiveReview();
+}
+
+function jumpToLine(line) {
+  const rows = code.value.split("\n");
+
+  const start = rows
+    .slice(0, line - 1)
+    .reduce((total, row) => total + row.length + 1, 0);
+
+  code.focus();
+  code.setSelectionRange(start, start);
+  redraw();
+}
+
+// COMUNICACIÓN CON EL SERVIDOR
+
+async function request(url, options) {
+  if (location.protocol === "file:") {
+    throw Error(
+      "Abre el IDE desde http://localhost:8877"
+    );
+  }
+
+  const response = await fetch(url, options);
+  const body = await response.text();
+
+  let data;
+
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw Error(
+      "No se recibió una respuesta válida del servidor."
+    );
+  }
+
+  if (!response.ok) {
+    throw Error(data.error || "Error de comunicación");
+  }
+
+  return data;
+}
+
+function payload() {
+  return {
+    name: $("filename").value.trim(),
+    content: code.value
+  };
+}
+
+function post(url) {
+  return request(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload())
+  });
+}
+
+// ARCHIVOS
+
+async function refreshFiles() {
+  const data = await request("/api/files");
+
+  for (const [id, origin, files] of [
+    ["saved", "saved", data.saved || []],
+    ["examples", "example", data.examples || []]
+  ]) {
+    const container = $(id);
+    container.replaceChildren();
+
+    for (const name of files) {
+      const button = document.createElement("button");
+      button.className = "file";
+      button.textContent = "⌁  " + name;
+
+      button.onclick = () => openFile(origin, name);
+      container.append(button);
+    }
+  }
+}
+
+async function openFile(origin, name) {
+  closeCompletions();
+  resetArtifacts();
+  clearTimeout(liveReviewTimer);
+  syntaxSequence++;
+
+  try {
+    const data = await request(
+      "/api/open?origin=" +
+      encodeURIComponent(origin) +
+      "&name=" + encodeURIComponent(name)
+    );
+
+    code.value = data.content;
+    $("filename").value = name;
+
+    errors = [];
+    suggestions = [];
+    $("errors").replaceChildren();
+    $("result").textContent = "Sin ejecutar";
+    $("console").textContent = "Archivo abierto.";
+
+    redraw();
+    message("Abierto: " + name);
+  } catch (error) {
+    message(error.message);
+  }
+}
+
+async function saveFile() {
+  try {
+    const data = await post("/api/save");
+    message("Guardado: " + data.name);
+    await refreshFiles();
+  } catch (error) {
+    message(error.message);
+  }
+}
+
+function newFile() {
+  clearTimeout(liveReviewTimer);
+  closeCompletions();
+  resetArtifacts();
+
+  syntaxSequence++;
+  code.value = "";
+  $("filename").value = "programa.e";
+
+  errors = [];
+  suggestions = [];
+  semanticTokens = [];
+
+  $("errors").replaceChildren();
+  $("result").textContent = "Sin ejecutar";
+  $("console").textContent = "La salida aparecerá aquí.";
+
+  redraw();
+  message("Nuevo archivo");
+  code.focus();
+}
+
+// ERRORES Y CORRECCIONES
+
+function renderIssues(items = [], reported = []) {
+  suggestions = items;
+  errors = [
+    ...new Set([
+      ...items.map(item => item.line),
+      ...reported
+    ])
+  ].filter(line => line > 0);
+
+  const list = $("errors");
+  list.replaceChildren();
+
+  for (const item of items) {
+    item._source = code.value;
+
+    const li = document.createElement("li");
+    
+  li.textContent =
+    `Línea ${item.line}, columna ${item.column + 1}: ` +
+    item.message + " ";
+
+  li.title = item.message;
+
+
+    li.onclick = () => jumpToLine(item.line);
+
+    if (item.code !== "NO_FIX") {
+      const button = document.createElement("button");
+      button.className = "fix-btn";
+      button.textContent = "Corregir";
+
+      button.onclick = event => {
+        event.stopPropagation();
+        applySuggestion(item);
+      };
+
+      li.append(button);
+    }
+
+    list.append(li);
+  }
+
+  for (const line of reported) {
+    if (items.some(item => item.line === line)) continue;
+
+    const li = document.createElement("li");
+    li.textContent = `Error en línea ${line}`;
+    li.onclick = () => jumpToLine(line);
+
+    list.append(li);
+  }
+
+  redraw();
+}
+
+function applySuggestion(item) {
+  if (item._source !== code.value) {
+    message("Revisa de nuevo antes de corregir.");
+    return;
+  }
+
+  const rows = code.value.split("\n");
+  const index = item.line - 1;
+
+  if (index < 0 || index >= rows.length) return;
+
+  if (item.code === "APPEND_BLOCK") {
+    if (rows[index].slice(item.column).trim()) {
+      message("El código cambió. Revisa de nuevo.");
+      return;
+    }
+
+    replaceEditorText(
+      0,
+      code.value.length,
+      code.value.trimEnd() + "\n} :)\n"
+    );
+
+  } else {
+    const pos = item.column;
+    const old = item.expected ?? "";
+    const replacement = item.replacement ?? "";
+
+    if (
+      pos < 0 ||
+      pos > rows[index].length ||
+      rows[index].slice(pos, pos + old.length) !== old
+    ) {
+      message("La corrección ya no coincide.");
+      return;
+    }
+
+    rows[index] =
+      rows[index].slice(0, pos) +
+      replacement +
+      rows[index].slice(pos + old.length);
+
+    replaceEditorText(
+      0,
+      code.value.length,
+      rows.join("\n")
+    );
+  }
+
+  closeCompletions();
+  renderIssues([]);
+  redraw();
+
+  $("result").textContent = "Sin compilar";
+  message("Corrección aplicada");
+
+  // Solicita una revisión sintáctica al servidor
+  checkSyntax(true);
+}
+
+async function checkSyntax(quiet = false) {
+  const id = ++syntaxSequence;
+  const snapshot = code.value;
+
+  if (!quiet) message("Revisando sintaxis…");
+
+  try {
+    const data = await post("/api/check");
+
+    if (
+      id !== syntaxSequence ||
+      snapshot !== code.value
+    ) return;
+
+    renderIssues(data.suggestions || []);
+
+    if (!quiet) {
+      $("result").textContent =
+        data.suggestions?.length
+          ? "Revisión con observaciones"
+          : "Sin observaciones";
+
+      $("console").textContent =
+        data.suggestions?.length
+          ? "Revisa las observaciones del editor."
+          : "Revisión rápida completada.";
+
+      message("Revisión terminada");
+    }
+  } catch (error) {
+    if (!quiet) message(error.message);
+  }
+}
+
+function scheduleLiveReview() {
+  clearTimeout(liveReviewTimer);
+
+  if (!$("liveReview").checked || !code.value.trim()) {
+    return;
+  }
+
+  liveReviewTimer = setTimeout(() => {
+    checkSyntax(true);
+  }, 900);
+}
+
+// AUTOCOMPLETADO
+
+function cursorWord() {
+  if (code.selectionStart !== code.selectionEnd) {
+    return null;
+  }
+
+  const pos = code.selectionStart;
+  const source = code.value;
+  const before = source.slice(0, pos);
+
+  let inBlock = false;
+  let inLine = false;
+  let inString = false;
+
+  for (let i = 0; i < before.length; i++) {
+    if (inLine) {
+      if (before[i] === "\n") inLine = false;
+      continue;
+    }
+
+    if (inBlock) {
+      if (before.startsWith("^^", i)) {
+        inBlock = false;
+        i++;
+      }
+      continue;
+    }
+
+    if (inString) {
+      if (before[i] === "\\") {
+        i++;
+      } else if (before[i] === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (before.startsWith("^^", i)) {
+      inBlock = true;
+      i++;
+    } else if (before[i] === "^") {
+      inLine = true;
+    } else if (before[i] === '"') {
+      inString = true;
+    }
+  }
+
+  if (inBlock || inLine || inString) {
+    return null;
+  }
+
+  const currentLine = before.slice(
+    before.lastIndexOf("\n") + 1
+  );
+
+  const match = currentLine.match(
+    /(#?[a-z][a-zA-Z_0-9]*)$/
+  );
+
+  if (!match || match[1].length < 2) {
+    return null;
+  }
+
+  if (/[a-zA-Z_0-9]/.test(source[pos] || "")) {
+    return null;
+  }
+
+  return {
+    prefix: match[1],
+    start: pos - match[1].length,
+    end: pos
+  };
+}
+
+
+function closeCompletions() {
+  completionItems = [];
+  completionWord = null;
+  completionBox.classList.remove("visible");
+  completionBox.replaceChildren();
+}
+
+function positionCompletions() {
+  const before = code.value.slice(0, code.selectionStart);
+  const lines = before.split("\n");
+  const line = lines.length - 1;
+  const col = lines[lines.length - 1]
+    .replace(/\t/g, "    ").length;
+
+  const width = code.parentElement.clientWidth;
+
+  const left = Math.max(
+    8,
+    Math.min(
+      width - 240,
+      16 + col * 8.45 - code.scrollLeft
+    )
+  );
+
+  const below = 16 + (line + 1) * 24 - code.scrollTop;
+  const top = below + 210 > code.clientHeight
+    ? Math.max(5, below - 210)
+    : Math.max(5, below);
+
+  completionBox.style.left = left + "px";
+  completionBox.style.top = top + "px";
+}
+
+function showCompletions(items, word) {
+  if (!items.length) {
+    closeCompletions();
+    return;
+  }
+
+  completionItems = items;
+  completionWord = word;
+  completionSelected = 0;
+
+  completionBox.replaceChildren();
+
+  items.forEach((item, index) => {
+    const button = document.createElement("button");
+
+    button.className =
+      "completion-opt" +
+      (index === 0 ? " selected" : "");
+
+    button.type = "button";
+    button.setAttribute("role", "option");
+
+    const label = document.createElement("span");
+    label.textContent = item.word;
+
+    const type = document.createElement("small");
+    type.textContent = item.token || "Token";
+
+    button.append(label, type);
+
+    button.onmousedown = event => event.preventDefault();
+    button.onclick = () => insertCompletion(index);
+
+    completionBox.append(button);
+  });
+
+  const hint = document.createElement("div");
+  hint.className = "completion-help";
+  hint.textContent =
+    "↑ ↓ seleccionar · Enter · Esc cerrar";
+
+  completionBox.append(hint);
+  completionBox.classList.add("visible");
+
+  positionCompletions();
+}
+
+function selectCompletion(index) {
+  if (!completionItems.length) return;
+
+  completionSelected =
+    (index + completionItems.length) %
+    completionItems.length;
+
+  completionBox
+    .querySelectorAll(".completion-opt")
+    .forEach((button, i) => {
+      const selected = i === completionSelected;
+      button.classList.toggle("selected", selected);
+
+      if (selected) {
+        button.scrollIntoView({ block: "nearest" });
+      }
+    });
+}
+
+/* AUTOCOMPLETADO DEL EDITOR
+ * Inserta la sugerencia seleccionada conservando,
+ * cuando el navegador lo permite, el historial de
+ * deshacer y rehacer
+ */
+function insertCompletion(index) {
+  const item = completionItems[index];
+  const current = cursorWord();
+
+  if (!item || !current || !completionWord) return;
+
+  if (
+    current.prefix !== completionWord.prefix ||
+    current.start !== completionWord.start
+  ) {
+    closeCompletions();
+    return;
+  }
+
+  // Cerrar las sugerencias antes de modificar el texto
+  closeCompletions();
+
+  // Reemplazar únicamente la palabra que se está completando
+  replaceEditorText(
+    current.start,
+    current.end,
+    item.word
+  );
+
+  // Actualizar colores, cursor y diagnósticos
+  redraw();
+}
+
+function scheduleCompletion() {
+  clearTimeout(completionTimer);
+  closeCompletions();
+
+  const word = cursorWord();
+  const sequence = ++completionSequence;
+
+  if (!word) return;
+
+  completionTimer = setTimeout(async () => {
+    try {
+      const data = await request("/api/complete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ prefix: word.prefix })
+      });
+
+      const current = cursorWord();
+
+      if (
+        sequence !== completionSequence ||
+        !current ||
+        current.prefix !== word.prefix ||
+        current.start !== word.start
+      ) return;
+
+      showCompletions(data.items || [], word);
+    
+  } catch (error) {
+    if (sequence === completionSequence) {
+      closeCompletions();
+      message("Autocompletado: " + error.message);
+    }
+  }
+
+  }, 95);
+}
+
+// COMPILACIÓN
+
+async function compile() {
+  closeCompletions();
+  clearTimeout(liveReviewTimer);
+  syntaxSequence++;
+
+  message("Compilando…");
+  $("result").textContent = "En curso";
+  $("console").textContent = "Ejecutando cdff…";
+
+  renderIssues([]);
+  resetArtifacts();
+
+  const snapshot = code.value;
+  const filename = $("filename").value;
+
+  try {
+    const data = await post("/api/compile");
+
+    if (
+      snapshot !== code.value ||
+      filename !== $("filename").value
+    ) {
+      message("El código cambió durante la compilación.");
+      return;
+    }
+
+    renderIssues(
+      data.suggestions || [],
+      data.lines || []
+    );
+
+    $("console").textContent =
+      data.output ||
+      data.message ||
+      (data.ok ? "Compilación correcta." : "Error.");
+
+    $("result").textContent =
+      data.ok ? "✓ Correcto" : "✕ Revisar errores";
+
+    
+if (data.ok && data.artifacts?.length) {
+  $("console").textContent +=
+    "\n\nArchivos generados: " +
+    data.artifacts.join(", ");
+
+  try {
+    await loadArtifacts(data.artifacts);
+  } catch (error) {
+    message("No se pudieron abrir los resultados: " +
+      error.message);
+  }
+}
+
+
+    message(
+      data.ok ? "Compilación terminada" : "Revisar salida"
+    );
+  } catch (error) {
+    $("console").textContent = error.message;
+    $("result").textContent = "Error";
+    message(error.message);
+  }
+}
+
+// DETECTOR DE CLONES
+
+async function findClones() {
+  const panel = $("cloneResults");
+  panel.textContent = "Analizando archivos…";
+
+  try {
+    const data = await request("/api/clones", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        include_examples: $("includeExamples").checked
+      })
+    });
+
+    panel.replaceChildren();
+
+    const summary = document.createElement("p");
+    summary.textContent =
+      `${data.files_scanned} archivos · ` +
+      `${(data.clones || []).length} coincidencias`;
+
+    panel.append(summary);
+
+    for (const item of data.clones || []) {
+      const entry = document.createElement("div");
+      entry.className = "clone-entry";
+
+      const title = document.createElement("strong");
+      title.textContent = `Tipo ${item.type} · `;
+      entry.append(title);
+
+      for (const side of ["a", "b"]) {
+        const file = item["file_" + side];
+        const begin = item["start_" + side];
+        const end = item["end_" + side];
+
+        if (side === "b") {
+          entry.append(document.createTextNode(" ↔ "));
+        }
+
+        const button = document.createElement("button");
+        button.textContent =
+          `${file} (líneas ${begin}-${end})`;
+
+        button.onclick = async () => {
+          const origin = file.startsWith("Guardado/")
+            ? "saved" : "example";
+
+          await openFile(origin, file.split("/").pop());
+          jumpToLine(begin);
+        };
+
+        entry.append(button);
+      }
+
+      panel.append(entry);
+    }
+
+    if (!data.clones?.length) {
+      const empty = document.createElement("p");
+      empty.textContent =
+        data.message || "No se encontraron clones.";
+      panel.append(empty);
+    }
+  } catch (error) {
+    panel.textContent = error.message;
+  }
+}
+
+// EVENTOS
+
+$("new").onclick = newFile;
+$("save").onclick = saveFile;
+$("compile").onclick = compile;
+$("check").onclick = () => checkSyntax(false);
+$("clones").onclick = findClones;
+
+$("liveReview").onchange = () => {
+  clearTimeout(liveReviewTimer);
+
+  if ($("liveReview").checked) {
+    scheduleLiveReview();
+  }
+};
+
+/* EDICIÓN DEL CÓDIGO Y CONSERVACIÓN DEL HISTORIAL
+ * Inserta o reemplaza texto utilizando el mecanismo de
+ * edición del navegador para conservar Ctrl+Z y Ctrl+Y.
+ * Se utiliza para tabulación, indentación de bloques
+ * y otras modificaciones realizadas desde JavaScript
+ */
+
+function replaceEditorText(start, end, text) {
+  code.focus();
+  code.setSelectionRange(start, end);
+
+  // En Chrome permite conservar el historial nativo.
+  const inserted = document.execCommand(
+    "insertText",
+    false,
+    text
+  );
+
+  // Alternativa para navegadores que no lo admitan
+  if (!inserted) {
+    code.setRangeText(text, start, end, "end");
+    changed();
+  }
+}
+
+
+/* TABULACIÓN DEL EDITOR
+ * Tab: agrega cuatro espacios
+ * Shift+Tab: elimina hasta cuatro espacios iniciales
+ * Si se seleccionan varias líneas, la operación se aplica a todas sin borrar su contenido
+ */
+
+function indentEditor(outdent = false) {
+  const start = code.selectionStart;
+  const end = code.selectionEnd;
+  const source = code.value;
+
+  const lineStart = source.lastIndexOf("\n", start - 1) + 1;
+
+  // Sin selección: insertar espacios en el cursor.
+  if (start === end && !outdent) {
+    replaceEditorText(start, end, "    ");
+    return;
+  }
+
+  // Si hay selección, trabajar con líneas completas.
+  let blockEnd = end;
+
+  // Evita incluir la línea siguiente cuando la
+  // selección termina exactamente al inicio de ella.
+  if (end > start && source[end - 1] === "\n") {
+    blockEnd--;
+  }
+
+  const lastLineEnd = source.indexOf("\n", blockEnd);
+  const lineEnd = lastLineEnd === -1
+    ? source.length
+    : lastLineEnd;
+
+  const original = source.slice(lineStart, lineEnd);
+  const lines = original.split("\n");
+
+  let firstRemoved = 0;
+  let firstAdded = 0;
+  let totalChange = 0;
+
+  const modified = lines.map((line, index) => {
+    if (outdent) {
+      const match = line.match(/^( {1,4}|\t)/);
+      const removed = match ? match[0].length : 0;
+
+      if (index === 0) firstRemoved = removed;
+      totalChange -= removed;
+
+      return line.slice(removed);
+    }
+
+    if (index === 0) firstAdded = 4;
+    totalChange += 4;
+
+    return "    " + line;
+  }).join("\n");
+
+  replaceEditorText(lineStart, lineEnd, modified);
+
+  // Mantener seleccionadas las líneas modificadas.
+  if (start !== end) {
+    const newStart = Math.max(
+      lineStart,
+      start + firstAdded - firstRemoved
+    );
+
+    const newEnd = Math.max(
+      newStart,
+      end + totalChange
+    );
+
+    code.setSelectionRange(newStart, newEnd);
+  }
+
+  redraw();
+}
+
+code.addEventListener("input", changed);
+
+code.addEventListener("click", () => {
+  redraw();
+  closeCompletions();
+});
+
+code.addEventListener("keyup", redraw);
+
+code.addEventListener("scroll", () => {
+  syncScroll();
+  drawErrors();
+
+  if (completionItems.length) {
+    positionCompletions();
+  }
+});
+
+/*ATAJOS DE TECLADO DEL EDITOR
+ * Ctrl+Enter: compilar
+ * Tab: indentar
+ * Shift+Tab: quitar indentación
+ * Ctrl+Z y Ctrl+Y quedan a cargo del historial nativo del navegador.
+ * El autocompletado conserva sus propios atajos.
+ */
+
+code.addEventListener("keydown", event => {
+
+  // Compilar el programa
+  if (event.ctrlKey && event.key === "Enter") {
+    event.preventDefault();
+    compile();
+    return;
+  }
+
+  // No bloquear los atajos nativos de deshacer/rehacer
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    ["z", "y"].includes(event.key.toLowerCase())
+  ) {
+    return;
+  }
+
+  // Navegación del menú de autocompletado
+  if (completionItems.length) {
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      selectCompletion(completionSelected + 1);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      selectCompletion(completionSelected - 1);
+      return;
+    }
+
+    // Enter acepta la sugerencia
+    if (event.key === "Enter") {
+      event.preventDefault();
+      insertCompletion(completionSelected);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCompletions();
+      return;
+    }
+  }
+
+  // Tabulación de una línea o bloque completo
+  if (event.key === "Tab") {
+    event.preventDefault();
+
+    closeCompletions();
+    indentEditor(event.shiftKey);
+
+    return;
+  }
+
+});
+
+document.addEventListener("keydown", event => {
+  if (
+    event.ctrlKey &&
+    event.key.toLowerCase() === "s"
+  ) {
+    event.preventDefault();
+    saveFile();
+  }
+});
+
+// INICIO
+
+code.value = "";
+redraw();
+
+request("/api/status")
+  .then(data => {
+    $("status").replaceChildren();
+
+    const dot = document.createElement("span");
+    dot.className =
+      "dot" + (data.compiler_ready ? " ready" : "");
+
+    $("status").append(dot);
+
+    $("status").append(
+      document.createTextNode(
+        data.compiler_ready
+          ? "Compilador disponible"
+          : "Compilador no encontrado"
+      )
+    );
+  })
+  .catch(() => {
+    $("status").textContent = "Sin conexión al servidor";
+  });
+
+refreshFiles().catch(error => {
+  message(error.message);
+});
+</script>
+
+</body>
+</html>
