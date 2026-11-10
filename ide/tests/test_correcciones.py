@@ -28,12 +28,12 @@ SYNTAX_SRC = IDE / "ide_syntax.c"
 LL1_SRC = IDE / "ll1_predict.c"
 
 
-class Persona4Correcciones(unittest.TestCase):
+class CorreccionesAutomaticas(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory(
-            prefix="cdff-persona4-correcciones-"
+            prefix="cdff-correcciones-"
         )
 
         cls.exe = Path(cls.tmp.name) / "ide_syntax"

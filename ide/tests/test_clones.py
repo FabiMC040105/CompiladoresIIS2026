@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Pruebas de Persona 4 para el detector de clones del IDE.
+Pruebas del detector de clones del IDE.
 
 Se valida:
 - Clones Tipo I.
@@ -25,12 +25,12 @@ CLONES_SRC = IDE / "ide_clones.c"
 LEXER = ROOT / "proyecto-1" / "src" / "lexer.l"
 
 
-class Persona4Clones(unittest.TestCase):
+class ClonesIDE(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory(
-            prefix="cdff-persona4-clones-"
+            prefix="cdff-clones-"
         )
 
         cls.exe = Path(cls.tmp.name) / "ide_clones"
