@@ -1477,43 +1477,29 @@ function applySuggestion(item) {
 
   if (index < 0 || index >= rows.length) return;
 
-  if (item.code === "APPEND_BLOCK") {
-    if (rows[index].slice(item.column).trim()) {
-      message("El código cambió. Revisa de nuevo.");
-      return;
-    }
+  const pos = item.column;
+  const old = item.expected ?? "";
+  const replacement = item.replacement ?? "";
 
-    replaceEditorText(
-      0,
-      code.value.length,
-      code.value.trimEnd() + "\n} :)\n"
-    );
-
-  } else {
-    const pos = item.column;
-    const old = item.expected ?? "";
-    const replacement = item.replacement ?? "";
-
-    if (
-      pos < 0 ||
-      pos > rows[index].length ||
-      rows[index].slice(pos, pos + old.length) !== old
-    ) {
-      message("La corrección ya no coincide.");
-      return;
-    }
-
-    rows[index] =
-      rows[index].slice(0, pos) +
-      replacement +
-      rows[index].slice(pos + old.length);
-
-    replaceEditorText(
-      0,
-      code.value.length,
-      rows.join("\n")
-    );
+  if (
+    pos < 0 ||
+    pos > rows[index].length ||
+    rows[index].slice(pos, pos + old.length) !== old
+  ) {
+    message("La corrección ya no coincide.");
+    return;
   }
+
+  rows[index] =
+    rows[index].slice(0, pos) +
+    replacement +
+    rows[index].slice(pos + old.length);
+
+  replaceEditorText(
+    0,
+    code.value.length,
+    rows.join("\n")
+  );
 
   closeCompletions();
   renderIssues([]);
