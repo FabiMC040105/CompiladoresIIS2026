@@ -40,3 +40,9 @@ node ide/tests/test_frontend.js    # si tienen Node.js
 ```
 
 Los diagnósticos de LL(1) son **sintácticos** y no sustituyen el compilador. En código temporalmente incompleto, las sugerencias pueden ser limitadas para evitar predicciones incorrectas. La gramática auxiliar se comprobó con el corpus de prueba, pero sin una prueba formal de equivalencia para todos los programas posibles.
+
+## Correcciones automáticas y detección de clones
+
+La implementación y las pruebas del sistema de correcciones guiadas por LL(1), así como la detección de clones Tipo I y Tipo II, se documentan en:
+
+- [`CORRECCIONES_Y_CLONES.md`](CORRECCIONES_Y_CLONES.md)

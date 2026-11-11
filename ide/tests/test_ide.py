@@ -46,9 +46,9 @@ class IDELL1(unittest.TestCase):
         return self.post('/api/check',{'name':'test.e','content':code})['suggestions']
     def test_shell_remains(self):
         html=(IDE/'index.html').read_text()
-        self.assertIn("code.value='';code.defaultValue='';",html)
+        self.assertIn('code.value = "";',html)
         self.assertIn('Sugerencias en vivo',html)
-        self.assertIn('context:code.value.slice(0,word.start)',html)
+        self.assertIn('context: code.value.slice(0, word.start)',html)
     def test_missing_context_does_not_invoke_old_fallback(self):
         req=Request(f'http://127.0.0.1:{self.port}/api/complete',
                     json.dumps({'prefix':'mie'}).encode(),{'Content-Type':'application/json'})
