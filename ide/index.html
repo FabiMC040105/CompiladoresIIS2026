@@ -1837,6 +1837,15 @@ async function compile() {
       return;
     }
 
+    // Mostrar la representacion intermedia recibida desde el compilador a traves de app.py
+
+    if (data.ir) {
+      window.CDFFResults.showIR(data.ir);
+    } else {
+      window.CDFFResults.clearIR();
+    }
+
+
     renderIssues(
       data.suggestions || [],
       data.lines || []

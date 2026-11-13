@@ -41,6 +41,41 @@ WORKSPACE = IDE_DIR / "workspace"
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 MAX_BYTES = 1024 * 1024
 
+
+# Marcadores que identifican la representacion intermedia enviada por el compilador C
+
+IR_BEGIN = "=== CDFF_IR_BEGIN ==="
+IR_END = "=== CDFF_IR_END ==="
+
+
+def extract_ir(output: str) -> tuple[str, str]:
+    """
+    Separa la representacion intermedia de la salida general del compilador
+    Retorna:
+        output_clean: mensajes normales del compilador
+        ir_text: codigo de tres direcciones
+    """
+
+    start = output.find(IR_BEGIN)
+
+    if start == -1:
+        return output, ""
+
+    end = output.find(IR_END, start + len(IR_BEGIN))
+
+    if end == -1:
+        return output, ""
+
+    ir_text = output[start + len(IR_BEGIN):end].strip()
+
+    output_clean = (
+        output[:start] +
+        output[end + len(IR_END):]
+    ).strip()
+
+    return output_clean, ir_text
+
+
 # Verifica que el nombre del archivo sea válido y tenga extensión .e
 
 def clean_name(value: object) -> str:
@@ -491,6 +526,8 @@ def handler_factory(src: Path):
                 try:
                     proc = subprocess.run([str(executable), "-s", "-o", str(out), str(file)], cwd=src, text=True, capture_output=True, timeout=30, check=False)
                     output = (proc.stdout + "\n" + proc.stderr).strip()
+                    # Separamos el IR de los mensajes del compilador
+                    output, ir_text = extract_ir(output)
                     lines = sorted({int(x) for x in re.findall(r"(?:l[ií]nea|line)\s+(\d+)", output, re.IGNORECASE)})
                     artifacts = [p.name for p in (out, file.with_suffix(".asm")) if p.is_file()] if proc.returncode == 0 else []
                     suggestions = (syntax_from_c(file) if proc.returncode != 0 else [])
@@ -500,7 +537,7 @@ def handler_factory(src: Path):
                         unique[(suggestion["line"], suggestion["code"])] = suggestion
                     suggestions = list(unique.values())
                     self.send_json({"ok": proc.returncode == 0, "exit_code": proc.returncode, "output": output,
-                                    "lines": lines, "artifacts": artifacts, "suggestions": suggestions})
+                                    "lines": lines, "artifacts": artifacts, "suggestions": suggestions, "ir": ir_text})
                 except subprocess.TimeoutExpired:
                     self.send_json({"ok": False, "output": "La compilación tardó más de 30 segundos.", "lines": []})
                 except OSError as exc:

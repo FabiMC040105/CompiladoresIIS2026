@@ -58,4 +58,7 @@ void bb_print_cfg(const BasicBlockCFG *cfg);
 //Libera la memoria utilizada
 void bb_free(BasicBlockCFG *cfg);
 
+// Construye e imprime los bloques basicos y el CFG a partir de el programa IR existente
+int bb_analyze_and_print(const IRProgram *program);
+
 #endif

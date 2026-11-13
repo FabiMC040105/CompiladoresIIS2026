@@ -631,3 +631,54 @@ void bb_free(BasicBlockCFG *cfg) {
     // 4. Liberamos la estructura principal
     free(cfg);
 }
+
+
+/*
+Integra la representacion intermedia con el analisis de bloques basicos y CFG
+Recibe un programa IR que ya fue generado por el modulo de representacion intermedia
+Retorna:
+1 si el analisis termina correctamente
+0 si ocurre algun error
+*/
+int bb_analyze_and_print(const IRProgram *program)
+{
+    BasicBlockCFG *cfg = NULL;
+
+    // Verificamos que exista un programa IR
+    if (program == NULL) {
+        fprintf(stderr,
+                "Error: no se recibio un programa IR.\n");
+        return 0;
+    }
+
+    // Mostramos las instrucciones de tres direcciones
+    printf("\n========== REPRESENTACION INTERMEDIA ==========\n");
+    ir_print(program, stdout);
+
+    // Construimos los bloques basicos utilizando el IR
+    cfg = bb_build(program);
+
+    if (cfg == NULL) {
+        fprintf(stderr,
+                "Error: no se pudieron construir los bloques basicos.\n");
+        return 0;
+    }
+
+    // Construimos las conexiones entre los bloques
+    if (!bb_build_cfg(cfg)) {
+        fprintf(stderr,
+                "Error: no se pudo construir el CFG.\n");
+
+        bb_free(cfg);
+        return 0;
+    }
+
+    // Mostramos los bloques y las conexiones
+    bb_print(cfg);
+    bb_print_cfg(cfg);
+
+    // Liberamos el CFG, pero no el programa IR original
+    bb_free(cfg);
+
+    return 1;
+}
