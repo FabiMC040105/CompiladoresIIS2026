@@ -27,6 +27,8 @@ entre el lexer y el parser.
 #include "resolucion_etiquetas.h"
 #include "binario.h"
 #include "vliw_packer.h"
+#include "ir.h"
+#include "basic_blocks.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1557,6 +1559,7 @@ static int copiar_ruta(const char *origen, char *destino, size_t capacidad)
 int main(int argc, char *argv[])
 {
     int resultado;
+    int opcion_ir_cfg = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1580,6 +1583,8 @@ int main(int argc, char *argv[])
             opcion_asm = 1;
         else if (strcmp(argv[i], "-p") == 0)
             opcion_paquetes = 1;
+        else if (strcmp(argv[i], "--ir-cfg") == 0)
+            opcion_ir_cfg = 1;
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1797,13 +1802,40 @@ int main(int argc, char *argv[])
     Las fases de generacion de codigo solo se ejecutan si el
     analisis semantico termino sin errores.
     */
-            if (errores_semanticos == 0)
+            /* Proyecto 2: generacion de IR, bloques basicos y CFG */
+            if (errores_semanticos == 0 && opcion_ir_cfg)
+            {
+                IRProgram programa_ir;
+                IRError error_ir = {0};
+                int ok_cfg;
+
+                ir_init(&programa_ir);
+
+                if (!ir_generate(raiz, &programa_ir, &error_ir))
+                {
+                    fprintf(stderr, "Error IR en linea %d: %s\n",
+                            error_ir.line, error_ir.message);
+
+                    ir_free(&programa_ir);
+                    goto error_compilacion;
+                }
+
+                ok_cfg = bb_analyze_and_print(&programa_ir);
+
+                ir_free(&programa_ir);
+
+                if (!ok_cfg)
+                    goto error_compilacion;
+            }
+
+            if (errores_semanticos == 0 && !opcion_ir_cfg)
             {
     /*
     Configura la comunicacion del generador de codigo con la tabla
     de simbolos. Permite resolver referencias a identificadores del AST
     y consultar el ambito en el cual fue reconocido cada uno.
     */
+    
                 CodegenTablaContexto contexto_codegen;
                 CodegenConfig config_codegen = {0};
 

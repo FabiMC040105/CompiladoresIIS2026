@@ -1,5 +1,5 @@
 # ================================================================
-# Proyecto 1 - Compiladores e Interpretes (cdff + VLIW)
+# Proyecto - Compiladores e Interpretes (cdff + VLIW)
 # Ejecutar desde proyecto-1/src con GNU Make >= 4.3
 # ================================================================
 
@@ -43,6 +43,10 @@ SRC := ast.c tabla_simbolos.c memoria.c semantico.c \
 HEADERS := ast.h tabla_simbolos.h memoria.h semantico.h \
            asm_emitter.h scheduler.h codegen.h codegen_tabla.h \
            resolucion_etiquetas.h etiquetas.h binario.h vliw_packer.h
+
+# Proyecto 2: representacion intermedia y CFG
+SRC += ir.c ir_ast.c basic_blocks.c
+HEADERS += ir.h basic_blocks.h
 
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
         simbolos arbol ast resolver wave check-bin \
