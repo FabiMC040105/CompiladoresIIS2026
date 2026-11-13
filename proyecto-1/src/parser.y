@@ -1560,6 +1560,7 @@ int main(int argc, char *argv[])
 {
     int resultado;
     int opcion_ir_cfg = 0;
+    int opcion_emit_ir = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1585,6 +1586,8 @@ int main(int argc, char *argv[])
             opcion_paquetes = 1;
         else if (strcmp(argv[i], "--ir-cfg") == 0)
             opcion_ir_cfg = 1;
+        else if (strcmp(argv[i], "--emit-ir") == 0)
+            opcion_emit_ir = 1;
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1803,7 +1806,8 @@ int main(int argc, char *argv[])
     analisis semantico termino sin errores.
     */
             /* Proyecto 2: generacion de IR, bloques basicos y CFG */
-            if (errores_semanticos == 0 && opcion_ir_cfg)
+            if (errores_semanticos == 0 &&
+                (opcion_ir_cfg || opcion_emit_ir))
             {
                 IRProgram programa_ir;
                 IRError error_ir = {0};
@@ -1820,7 +1824,19 @@ int main(int argc, char *argv[])
                     goto error_compilacion;
                 }
 
-                ok_cfg = bb_analyze_and_print(&programa_ir);
+                ok_cfg = 1;
+
+                /* Envia la IR al IDE entre marcadores. */
+                if (opcion_emit_ir)
+                {
+                    printf("\n=== CDFF_IR_BEGIN ===\n");
+                    ir_print(&programa_ir, stdout);
+                    printf("=== CDFF_IR_END ===\n");
+                }
+
+                /* Muestra los bloques basicos y CFG si se solicitan. */
+                if (opcion_ir_cfg)
+                    ok_cfg = bb_analyze_and_print(&programa_ir);
 
                 ir_free(&programa_ir);
 

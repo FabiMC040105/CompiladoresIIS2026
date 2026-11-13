@@ -729,7 +729,7 @@ let semanticTokens = [];
 
 let generatedArtifacts = [];
 
-function resetArtifacts() {
+function resetArtifacts(clearIR = true) {
   generatedArtifacts = [];
 
   $("artifactStatus").textContent = "Sin archivos";
@@ -741,9 +741,11 @@ function resetArtifacts() {
     $(kind.toLowerCase() + "Empty").hidden = false;
   }
 
-  $("irContent").hidden = true;
-  $("irContent").textContent = "";
-  $("irEmpty").hidden = false;
+  if (clearIR) {
+    $("irContent").hidden = true;
+    $("irContent").textContent = "";
+    $("irEmpty").hidden = false;
+}
 }
 
 function showResultTab(panelId) {
@@ -803,7 +805,7 @@ $("downloadBin").onclick = () => downloadArtifact("bin");
  */
 
 async function loadArtifacts(names) {
-  resetArtifacts();
+    resetArtifacts(false);
 
   generatedArtifacts = names.filter(
     name => /^[a-zA-Z0-9_-]+\.(asm|bin)$/.test(name)

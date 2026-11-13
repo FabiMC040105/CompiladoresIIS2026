@@ -524,7 +524,7 @@ def handler_factory(src: Path):
                         generated.unlink()
 
                 try:
-                    proc = subprocess.run([str(executable), "-s", "-o", str(out), str(file)], cwd=src, text=True, capture_output=True, timeout=30, check=False)
+                    proc = subprocess.run([str(executable), "-s", "--emit-ir", "-o", str(out), str(file)], cwd=src, text=True, capture_output=True, timeout=30, check=False)
                     output = (proc.stdout + "\n" + proc.stderr).strip()
                     # Separamos el IR de los mensajes del compilador
                     output, ir_text = extract_ir(output)
