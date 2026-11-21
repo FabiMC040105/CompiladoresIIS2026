@@ -1,0 +1,22 @@
+# Pruebas aisladas: no requiere Flex/Bison ni modifica el Makefile del equipo.
+CC ?= gcc
+CFLAGS ?= -std=c11 -Wall -Wextra -Werror -g -O0
+TEST_DIR ?= evidencia-vliw/.make-tests
+.PHONY: test-dependencias
+
+test-dependencias: $(TEST_DIR)/prueba_dependencias
+	"$(abspath $(TEST_DIR)/prueba_dependencias)"
+
+$(TEST_DIR)/prueba_dependencias: prueba_dependencias.c dependencias.c dependencias.h ir.c ir.h basic_blocks.c basic_blocks.h ir_ast.c ast.c ast.h
+	mkdir -p "$(TEST_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ prueba_dependencias.c dependencias.c ir.c basic_blocks.c ir_ast.c ast.c $(LDFLAGS) $(LDLIBS)
+
+.PHONY: test-dag test-persona3
+test-persona3: test-dependencias test-dag
+
+test-dag: $(TEST_DIR)/prueba_dag
+	"$(abspath $(TEST_DIR)/prueba_dag)"
+
+$(TEST_DIR)/prueba_dag: prueba_dag.c dag.c dag.h dependencias.c dependencias.h ir.c ir.h basic_blocks.c basic_blocks.h ir_ast.c ast.c ast.h
+	mkdir -p "$(TEST_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ prueba_dag.c dag.c dependencias.c ir.c basic_blocks.c ir_ast.c ast.c $(LDFLAGS) $(LDLIBS)
