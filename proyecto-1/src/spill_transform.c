@@ -9,8 +9,9 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#define SPILL_BASE "cdff_spill_area"
+#define SPILL_BASE SPILL_IR_AREA
 #define MAX_RONDAS_SPILL 128
 
 static char **campo_mutable(IRInstruction *inst, unsigned campo)
@@ -432,6 +433,15 @@ int spill_resolver_programa(
         cantidad_colores <= 0)
         return 0;
 
+    /* Este nombre es reservado para el backend; impedir colisiones con
+       identificadores declarados por el programa fuente. */
+    for (size_t i=0; i<programa->count; ++i) {
+        const IRInstruction *v=&programa->instructions[i];
+        if ((v->op==IR_DECL || v->op==IR_PARAM_DECL ||
+             v->op==IR_ARRAY_DECL || v->op==IR_MATRIX_DECL) &&
+            v->result && !strcmp(v->result,SPILL_IR_AREA)) return 0;
+    }
+
     gi_init(&grafo);
     ar_init(&asignacion);
 
@@ -524,4 +534,32 @@ error:
     ar_free(&asignacion);
 
     return 0;
+}
+
+/* Interfaz de preparacion para codegen_ir. El algoritmo iterativo de
+   spilling libera el coloreo anterior al terminar; esta funcion lo
+   reconstruye a partir de la IR optimizada definitiva y devuelve un
+   mapeo de registros que permanece valido hasta la siguiente mutacion. */
+int spill_asignacion_final(const IRProgram *programa, int cantidad_colores,
+                          int registro_base, AsignacionRegistros *salida)
+{
+    GrafoInterferencia grafo;
+    AsignacionRegistros temporal;
+    int ok=0;
+    if (!programa || !salida || cantidad_colores<=0 || registro_base<0 ||
+        (programa->count && !programa->instructions)) return 0;
+    gi_init(&grafo);
+    ar_init(&temporal);
+    if (!analizar_grafo(programa,&grafo) ||
+        !gi_colorear(&grafo,cantidad_colores) ||
+        gi_contar_spills(&grafo)!=0 ||
+        !ar_construir(&grafo,registro_base,&temporal)) goto fin;
+    ar_free(salida);
+    *salida=temporal;
+    ar_init(&temporal);
+    ok=1;
+fin:
+    ar_free(&temporal);
+    gi_free(&grafo);
+    return ok;
 }

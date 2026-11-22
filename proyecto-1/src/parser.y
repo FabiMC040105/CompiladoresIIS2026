@@ -30,7 +30,7 @@ entre el lexer y el parser.
 #include "ir.h"
 #include "basic_blocks.h"
 #include "dead_code_elimination.h"
-#include "spill_transform.h"
+#include "optimizaciones_ir.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1503,7 +1503,14 @@ static void mostrar_uso(FILE *f)
         "  -s              Conserva tambien el ensamblador final (.asm).\n"
         "  -x <archivo>    Ensambla directamente un archivo .asm a codigo maquina.\n"
         "  -p              Muestra cada paquete en ASM, HEX y binario.\n"
-        "  --spill         Activa spilling register.\n"
+        "  --emit-ir       Imprime IR resultante.\n"
+        "  --ir-cfg        Imprime CFG resultante.\n"
+        "  --dce           Elimina codigo muerto en IR.\n"
+        "  --spill         Activa spilling IR y spilling del backend AST.\n"
+        "  --spill-ir      Activa solo spilling sobre la IR.\n"
+        "  --renombrar-ir  Renombra definiciones/temporales de la IR.\n"
+        "  --reordenar-ir  Reordena instrucciones IR segun dependencias.\n"
+        "  --opt-ir        DCE + renombramiento + reordenamiento + spilling IR.\n"
         "  -h, --help      Muestra esta ayuda.\n");
 }
 
@@ -1569,6 +1576,7 @@ int main(int argc, char *argv[])
 
     // Activa spilling register.
     int opcion_spill = 0;
+    unsigned fases_ir = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1599,6 +1607,14 @@ int main(int argc, char *argv[])
         // Activamos DCE cuando el usuario solicita esta optimizacion
         else if (strcmp(argv[i], "--dce") == 0)
             opcion_dce = 1;
+        else if (strcmp(argv[i], "--renombrar-ir") == 0)
+            fases_ir |= OPT_IR_RENOMBRAR;
+        else if (strcmp(argv[i], "--reordenar-ir") == 0)
+            fases_ir |= OPT_IR_REORDENAR;
+        else if (strcmp(argv[i], "--spill-ir") == 0)
+            fases_ir |= OPT_IR_SPILL;
+        else if (strcmp(argv[i], "--opt-ir") == 0)
+            fases_ir |= OPT_IR_TODAS;
         else if (strcmp(argv[i], "--spill") == 0)
             opcion_spill = 1;
         else if (strcmp(argv[i], "-o") == 0)
@@ -1819,83 +1835,38 @@ int main(int argc, char *argv[])
     analisis semantico termino sin errores.
     */
             /* Proyecto 2: generacion de IR, bloques basicos y CFG */
-            // Generamos IR cuando necesitamos mostrarlo, analizar su CFG
-            // o ejecutar la optimizacion de codigo muerto.
+            // Los flags de fases modifican la IR; las etapas de codegen AST
+            // siguen funcionando como antes hasta integrar codegen_ir.
             if (errores_semanticos == 0 &&
-                (opcion_ir_cfg || opcion_emit_ir || opcion_dce || opcion_spill))
+                (opcion_ir_cfg || opcion_emit_ir || opcion_dce ||
+                 opcion_spill || fases_ir))
             {
                 IRProgram programa_ir;
                 IRError error_ir = {0};
-                int ok_cfg;
+                OptIREstadisticas estadisticas_ir = {0};
+                unsigned fases = fases_ir |
+                    (opcion_dce ? OPT_IR_DCE : 0u) |
+                    (opcion_spill ? OPT_IR_SPILL : 0u);
+                int ok_cfg = 1;
 
                 ir_init(&programa_ir);
-
                 if (!ir_generate(raiz, &programa_ir, &error_ir))
                 {
                     fprintf(stderr, "Error IR en linea %d: %s\n",
                             error_ir.line, error_ir.message);
-
                     ir_free(&programa_ir);
                     goto error_compilacion;
                 }
 
-                ok_cfg = 1;
-
-                // Ejecutamos DCE solamente cuando se solicita esta optimizacion.
-                // La funcion modifica el IR eliminando las instrucciones innecesarias.
-                if (opcion_dce)
+                /* API central, reutilizable por el futuro codegen_ir. */
+                if (fases && !opt_ir_aplicar(&programa_ir, fases, 9, 4,
+                                             &estadisticas_ir))
                 {
-                    ResultadoDCE resultado_dce = {0};
-
-                    if (!eliminar_codigo_muerto(&programa_ir, &resultado_dce))
-                    {
-                        fprintf(stderr, "Error: fallo la optimizacion DCE.\n");
-
-                        ir_free(&programa_ir);
-                        goto error_compilacion;
-                    }
-
-                    // Mostramos las estadisticas para comprobar cuanto codigo eliminamos.
-                    mostrar_estadisticas_dce(&resultado_dce);
+                    fprintf(stderr, "Error: fallo la integracion de optimizaciones IR.\n");
+                    ir_free(&programa_ir);
+                    goto error_compilacion;
                 }
-
-                /*
-                 * Spilling register:
-                 *
-                 * liveness
-                 * -> grafo de interferencia
-                 * -> coloreo con 9 colores
-                 * -> seleccion de spill
-                 * -> STORE/LOAD en IR
-                 * -> recoloreo.
-                 */
-                if (opcion_spill)
-                {
-                    ResultadoSpill resultado_spill = {0};
-
-                    if (!spill_resolver_programa(
-                            &programa_ir,
-                            9,
-                            4,
-                            &resultado_spill))
-                    {
-                        fprintf(
-                            stderr,
-                            "Error: fallo la optimizacion de spilling.\n"
-                        );
-
-                        ir_free(&programa_ir);
-                        goto error_compilacion;
-                    }
-
-                    printf(
-                        "[SPILL IR] rondas=%zu STORE=%zu LOAD=%zu slots=%zu\n",
-                        resultado_spill.rondas,
-                        resultado_spill.stores,
-                        resultado_spill.loads,
-                        resultado_spill.slots
-                    );
-                }
+                if (fases) opt_ir_imprimir(&estadisticas_ir, stdout);
 
                 /* Envia la IR al IDE entre marcadores. */
                 if (opcion_emit_ir)
