@@ -45,10 +45,10 @@ HEADERS := ast.h tabla_simbolos.h memoria.h semantico.h \
            resolucion_etiquetas.h etiquetas.h binario.h vliw_packer.h
 
 # Proyecto 2: IR, bloques basicos y optimizacion de codigo muerto.
-SRC += ir.c ir_ast.c basic_blocks.c liveness.c dead_code_elimination.c
+SRC += ir.c ir_ast.c basic_blocks.c liveness.c dead_code_elimination.c dependencias.c grafo_interferencia.c asignacion_registros.c spill_transform.c
 
 # Agregamos los encabezados de los modulos que utiliza esta fase.
-HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h
+HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h dependencias.h grafo_interferencia.h asignacion_registros.h spill_transform.h
 
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
         simbolos arbol ast resolver wave check-bin \
@@ -297,3 +297,51 @@ help:
 	  'Variables: FILE=..., ASM=..., OUT=..., ARGS=..., ARQ_ROOT=...' \
 	  'Ayuda del compilador: ./cdff --help' \
 	  '=========================================================='
+
+# ---------------------------------------------------------------
+#  grafo de interferencia y coloreo para spilling
+# ---------------------------------------------------------------
+$(TEST_DIR)/prueba_grafo_interferencia: \
+        pruebas/prueba_grafo_interferencia.c \
+        grafo_interferencia.c grafo_interferencia.h \
+        liveness.c liveness.h \
+        basic_blocks.c basic_blocks.h \
+        ir.c ir.h | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ \
+	    pruebas/prueba_grafo_interferencia.c \
+	    grafo_interferencia.c \
+	    liveness.c \
+	    basic_blocks.c \
+	    ir.c \
+	    $(LDFLAGS) $(LDLIBS)
+
+.PHONY: test-grafo-spill
+test-grafo-spill: $(TEST_DIR)/prueba_grafo_interferencia
+	./$(TEST_DIR)/prueba_grafo_interferencia
+
+# ---------------------------------------------------------------
+# Spilling register: transformacion y recoloreo
+# ---------------------------------------------------------------
+$(TEST_DIR)/prueba_spill_transform: \
+        pruebas/prueba_spill_transform.c \
+        spill_transform.c spill_transform.h \
+        asignacion_registros.c asignacion_registros.h \
+        grafo_interferencia.c grafo_interferencia.h \
+        dependencias.c dependencias.h \
+        liveness.c liveness.h \
+        basic_blocks.c basic_blocks.h \
+        ir.c ir.h | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ \
+	    pruebas/prueba_spill_transform.c \
+	    spill_transform.c \
+	    asignacion_registros.c \
+	    grafo_interferencia.c \
+	    dependencias.c \
+	    liveness.c \
+	    basic_blocks.c \
+	    ir.c \
+	    $(LDFLAGS) $(LDLIBS)
+
+.PHONY: test-spill
+test-spill: $(TEST_DIR)/prueba_spill_transform
+	./$(TEST_DIR)/prueba_spill_transform

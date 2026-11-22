@@ -68,6 +68,9 @@ typedef struct {
     unsigned nops_dependencia;
     /* Primer byte libre despues de las globales (limite para x14/SP). */
     uint32_t fin_globales;
+
+    /* Activa spilling fisico de temporales x4-x12. */
+    int habilitar_spilling;
 } CodegenConfig;
 
 int codegen_generar_archivo(NodoAST *raiz,

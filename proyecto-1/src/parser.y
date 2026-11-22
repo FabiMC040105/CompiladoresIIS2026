@@ -30,6 +30,7 @@ entre el lexer y el parser.
 #include "ir.h"
 #include "basic_blocks.h"
 #include "dead_code_elimination.h"
+#include "spill_transform.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1502,6 +1503,7 @@ static void mostrar_uso(FILE *f)
         "  -s              Conserva tambien el ensamblador final (.asm).\n"
         "  -x <archivo>    Ensambla directamente un archivo .asm a codigo maquina.\n"
         "  -p              Muestra cada paquete en ASM, HEX y binario.\n"
+        "  --spill         Activa spilling register.\n"
         "  -h, --help      Muestra esta ayuda.\n");
 }
 
@@ -1564,6 +1566,9 @@ int main(int argc, char *argv[])
     int opcion_emit_ir = 0;
     // Permite activar la optimizacion DCE desde la terminal.
     int opcion_dce = 0;
+
+    // Activa spilling register.
+    int opcion_spill = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1594,6 +1599,8 @@ int main(int argc, char *argv[])
         // Activamos DCE cuando el usuario solicita esta optimizacion
         else if (strcmp(argv[i], "--dce") == 0)
             opcion_dce = 1;
+        else if (strcmp(argv[i], "--spill") == 0)
+            opcion_spill = 1;
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1815,7 +1822,7 @@ int main(int argc, char *argv[])
             // Generamos IR cuando necesitamos mostrarlo, analizar su CFG
             // o ejecutar la optimizacion de codigo muerto.
             if (errores_semanticos == 0 &&
-                (opcion_ir_cfg || opcion_emit_ir || opcion_dce))
+                (opcion_ir_cfg || opcion_emit_ir || opcion_dce || opcion_spill))
             {
                 IRProgram programa_ir;
                 IRError error_ir = {0};
@@ -1850,6 +1857,44 @@ int main(int argc, char *argv[])
 
                     // Mostramos las estadisticas para comprobar cuanto codigo eliminamos.
                     mostrar_estadisticas_dce(&resultado_dce);
+                }
+
+                /*
+                 * Spilling register:
+                 *
+                 * liveness
+                 * -> grafo de interferencia
+                 * -> coloreo con 9 colores
+                 * -> seleccion de spill
+                 * -> STORE/LOAD en IR
+                 * -> recoloreo.
+                 */
+                if (opcion_spill)
+                {
+                    ResultadoSpill resultado_spill = {0};
+
+                    if (!spill_resolver_programa(
+                            &programa_ir,
+                            9,
+                            4,
+                            &resultado_spill))
+                    {
+                        fprintf(
+                            stderr,
+                            "Error: fallo la optimizacion de spilling.\n"
+                        );
+
+                        ir_free(&programa_ir);
+                        goto error_compilacion;
+                    }
+
+                    printf(
+                        "[SPILL IR] rondas=%zu STORE=%zu LOAD=%zu slots=%zu\n",
+                        resultado_spill.rondas,
+                        resultado_spill.stores,
+                        resultado_spill.loads,
+                        resultado_spill.slots
+                    );
                 }
 
                 /* Envia la IR al IDE entre marcadores. */
@@ -1891,6 +1936,9 @@ int main(int argc, char *argv[])
                     &contexto_codegen;
                 config_codegen.fin_globales =
                     (uint32_t)tabla->siguiente_direccion_global;
+
+                config_codegen.habilitar_spilling =
+                    opcion_spill;
 
                 if (opcion_verbose)
                     printf("[FASE 4] Generando ensamblador y calendarizando dependencias...\n");
