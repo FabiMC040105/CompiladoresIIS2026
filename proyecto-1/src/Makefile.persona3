@@ -30,3 +30,13 @@ test-renombramiento: $(TEST_DIR)/prueba_renombramiento
 $(TEST_DIR)/prueba_renombramiento: prueba_renombramiento.c renombramiento.c renombramiento.h dag.c dag.h dependencias.c dependencias.h ir.c ir.h basic_blocks.c basic_blocks.h ir_ast.c ast.c ast.h
 	mkdir -p "$(TEST_DIR)"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ prueba_renombramiento.c renombramiento.c dag.c dependencias.c ir.c basic_blocks.c ir_ast.c ast.c $(LDFLAGS) $(LDLIBS)
+
+.PHONY: test-reordenamiento
+test-persona3: test-reordenamiento
+
+test-reordenamiento: $(TEST_DIR)/prueba_reordenamiento
+	"$(abspath $(TEST_DIR)/prueba_reordenamiento)"
+
+$(TEST_DIR)/prueba_reordenamiento: prueba_reordenamiento.c reordenamiento.c reordenamiento.h scheduler.h renombramiento.c renombramiento.h dag.c dag.h dependencias.c dependencias.h ir.c ir.h basic_blocks.c basic_blocks.h ir_ast.c ast.c ast.h
+	mkdir -p "$(TEST_DIR)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ prueba_reordenamiento.c reordenamiento.c renombramiento.c dag.c dependencias.c ir.c basic_blocks.c ir_ast.c ast.c $(LDFLAGS) $(LDLIBS)
