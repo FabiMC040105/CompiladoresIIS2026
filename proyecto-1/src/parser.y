@@ -31,6 +31,7 @@ entre el lexer y el parser.
 #include "basic_blocks.h"
 #include "dead_code_elimination.h"
 #include "codegen_ir.h"
+#include "optimizaciones_ir.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1503,6 +1504,15 @@ static void mostrar_uso(FILE *f)
         "  -s              Conserva tambien el ensamblador final (.asm).\n"
         "  -x <archivo>    Ensambla directamente un archivo .asm a codigo maquina.\n"
         "  -p              Muestra cada paquete en ASM, HEX y binario.\n"
+        "  --emit-ir       Imprime la representación intermedia.\n"
+        "  --ir-cfg        Imprime el grafo de flujo de control.\n"
+        "  --dce           Elimina código muerto del IR.\n"
+        "  --codegen-ir    Genera ensamblador utilizando el backend IR.\n"
+        "  --spill         Activa spilling AST y la fase de spilling IR.\n"
+        "  --spill-ir      Activa solamente spilling IR.\n"
+        "  --renombrar-ir  Renombra definiciones y temporales del IR.\n"
+        "  --reordenar-ir  Reordena instrucciones según dependencias.\n"
+        "  --opt-ir        Activa las cuatro optimizaciones del IR.\n"
         "  -h, --help      Muestra esta ayuda.\n");
 }
 
@@ -1567,6 +1577,14 @@ int main(int argc, char *argv[])
     int opcion_dce = 0;
     // Permite probar el generador desde IR sin reemplazar el backend original.
     int opcion_codegen_ir = 0;
+    // Permite activar el spilling del backend AST.
+    int opcion_spill = 0;
+    // Guarda las fases de optimización solicitadas para IR.
+    unsigned fases_ir = 0;
+
+    // Estas fases se aplicarán tanto al IR mostrado
+    // como al IR utilizado para generar ensamblador.
+    unsigned fases_ir_activas = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1600,6 +1618,21 @@ int main(int argc, char *argv[])
         // Activamos el backend experimental que traduce IR a ensamblador
         else if (strcmp(argv[i], "--codegen-ir") == 0)
             opcion_codegen_ir = 1;
+        // Activa el spilling del backend AST y del IR.
+        else if (strcmp(argv[i], "--spill") == 0)
+            opcion_spill = 1;
+        // Activa solamente la fase de spilling del IR.
+        else if (strcmp(argv[i], "--spill-ir") == 0)
+            fases_ir |= OPT_IR_SPILL;
+        // Renombra las definiciones y temporales del IR.
+        else if (strcmp(argv[i], "--renombrar-ir") == 0)
+            fases_ir |= OPT_IR_RENOMBRAR;
+        // Reordena las instrucciones según sus dependencias.
+        else if (strcmp(argv[i], "--reordenar-ir") == 0)
+            fases_ir |= OPT_IR_REORDENAR;
+        // Activa las cuatro fases de optimización del IR.
+        else if (strcmp(argv[i], "--opt-ir") == 0)
+            fases_ir |= OPT_IR_TODAS;
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1817,11 +1850,17 @@ int main(int argc, char *argv[])
     Las fases de generacion de codigo solo se ejecutan si el
     analisis semantico termino sin errores.
     */
+            // Combinamos las fases solicitadas antes de generar IR.
+            fases_ir_activas = fases_ir |
+                (opcion_dce ? OPT_IR_DCE : 0u) |
+                (opcion_spill ? OPT_IR_SPILL : 0u);
+
             /* Proyecto 2: generacion de IR, bloques basicos y CFG */
             // Generamos IR cuando necesitamos mostrarlo, analizar su CFG
             // o ejecutar la optimizacion de codigo muerto.
             if (errores_semanticos == 0 &&
-                (opcion_ir_cfg || opcion_emit_ir || opcion_dce))
+                (opcion_ir_cfg || opcion_emit_ir || opcion_dce ||
+                 opcion_spill || fases_ir))
             {
                 IRProgram programa_ir;
                 IRError error_ir = {0};
@@ -1840,22 +1879,28 @@ int main(int argc, char *argv[])
 
                 ok_cfg = 1;
 
-                // Ejecutamos DCE solamente cuando se solicita esta optimizacion.
-                // La funcion modifica el IR eliminando las instrucciones innecesarias.
-                if (opcion_dce)
+                // Aplicamos las optimizaciones solicitadas sobre el IR.
+                // Si no se seleccionó ninguna fase, conservamos el IR original.
+                if (fases_ir_activas)
                 {
-                    ResultadoDCE resultado_dce = {0};
+                    OptIREstadisticas estadisticas_opt = {0};
 
-                    if (!eliminar_codigo_muerto(&programa_ir, &resultado_dce))
+                    if (!opt_ir_aplicar(
+                            &programa_ir,
+                            fases_ir_activas,
+                            9,
+                            4,
+                            &estadisticas_opt))
                     {
-                        fprintf(stderr, "Error: fallo la optimizacion DCE.\n");
+                        fprintf(stderr,
+                                "Error: fallo la optimizacion del IR.\n");
 
                         ir_free(&programa_ir);
                         goto error_compilacion;
                     }
 
-                    // Mostramos las estadisticas para comprobar cuanto codigo eliminamos.
-                    mostrar_estadisticas_dce(&resultado_dce);
+                    // Mostramos los resultados de las fases ejecutadas.
+                    opt_ir_imprimir(&estadisticas_opt, stdout);
                 }
 
                 /* Envia la IR al IDE entre marcadores. */
@@ -1897,6 +1942,9 @@ int main(int argc, char *argv[])
                     &contexto_codegen;
                 config_codegen.fin_globales =
                     (uint32_t)tabla->siguiente_direccion_global;
+
+                // Activamos el spilling del backend AST si se solicita.
+                config_codegen.habilitar_spilling = opcion_spill;
 
                 if (opcion_verbose)
                     printf("[FASE 4] Generando ensamblador y calendarizando dependencias...\n");
@@ -1945,16 +1993,31 @@ int main(int argc, char *argv[])
         * Asi las instrucciones eliminadas no llegan al
         * backend IR.
         */
-        if (opcion_dce)
+        // Aplicamos las optimizaciones antes de generar ASM.
+        // El spilling IR requiere soporte adicional de memoria,
+        // por lo que todavía no lo enviamos al backend.
+        if (fases_ir_activas & OPT_IR_SPILL)
         {
-            ResultadoDCE resultado_dce = {0};
+            fprintf(stderr,
+                    "Error: spilling IR pendiente de soporte en codegen_ir.\n");
 
-            if (!eliminar_codigo_muerto(
+            ir_free(&programa_ir_codegen);
+            goto error_compilacion;
+        }
+
+        if (fases_ir_activas)
+        {
+            OptIREstadisticas estadisticas_opt = {0};
+
+            if (!opt_ir_aplicar(
                     &programa_ir_codegen,
-                    &resultado_dce))
+                    fases_ir_activas,
+                    9,
+                    4,
+                    &estadisticas_opt))
             {
                 fprintf(stderr,
-                        "Error: fallo DCE para CodeGen IR.\n");
+                        "Error: fallo la optimizacion para CodeGen IR.\n");
 
                 ir_free(&programa_ir_codegen);
                 goto error_compilacion;
@@ -2082,6 +2145,8 @@ int main(int argc, char *argv[])
     Al terminar la generacion se eliminan los archivos intermedios.
     El ensamblador final solo se conserva si se solicito la opcion -s.
     */
+                /* Temporalmente conservamos el ASM intermedio
+                   para verificar la ejecución de las optimizaciones. */
                 remove(ruta_asm_intermedia);
                 remove(ruta_asm_resuelta);
 

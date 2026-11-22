@@ -61,6 +61,10 @@ typedef struct {
     } pila_bucles[MAX_NIVELES_BUCLE];
     unsigned profundidad_bucle;
     int usa_error_pila;
+
+    /* Estadisticas del spilling fisico generado por el backend. */
+    size_t spill_stores;
+    size_t spill_loads;
 } Codegen;
 
 /*----------------------------- FUNCIONES AUXILIARES DEL GENERADOR -----------------------------*/
@@ -1688,6 +1692,168 @@ static int emitir_verificacion_pila(Codegen *cg,
 }
 
 /*
+ * Cuenta cuantos registros temporales x4-x12 estan disponibles.
+ */
+static int contar_temps_libres(const Codegen *cg)
+{
+    int reg;
+    int libres = 0;
+
+    for (reg = REG_TEMP_PRIMERO;
+         reg <= REG_TEMP_ULTIMO;
+         reg++) {
+
+        if (!cg->temp_ocupado[reg])
+            libres++;
+    }
+
+    return libres;
+}
+
+/*
+ * Estima la presion de registros de una expresion.
+ *
+ * La evaluacion actual es izquierda -> derecha. Mientras se evalua
+ * el lado derecho, el resultado izquierdo permanece vivo.
+ */
+static int presion_expresion(NodoAST *nodo)
+{
+    int p_izq;
+    int p_der;
+    int p;
+
+    if (nodo == NULL)
+        return 0;
+
+    if (nodo->tipo != AST_OPERACION)
+        return 1;
+
+    if (nodo->valor != NULL &&
+        strcmp(nodo->valor, "unario -") == 0) {
+
+        return presion_expresion(
+            hijo_n(nodo, 0)
+        );
+    }
+
+    p_izq =
+        presion_expresion(
+            hijo_n(nodo, 0)
+        );
+
+    p_der =
+        presion_expresion(
+            hijo_n(nodo, 1)
+        );
+
+    /*
+     * Al evaluar el derecho, el resultado izquierdo
+     * ya ocupa un registro.
+     */
+    p = p_izq > 1 + p_der
+        ? p_izq
+        : 1 + p_der;
+
+    /*
+     * Las operaciones implementadas por software
+     * necesitan temporales adicionales.
+     */
+    if (nodo->valor != NULL &&
+        (strcmp(nodo->valor, "*") == 0 ||
+         strcmp(nodo->valor, "/") == 0 ||
+         strcmp(nodo->valor, "%") == 0)) {
+
+        if (p < 6)
+            p = 6;
+    }
+
+    if (nodo->valor != NULL &&
+        strcmp(nodo->valor, "**") == 0) {
+
+        if (p < 9)
+            p = 9;
+    }
+
+    return p;
+}
+
+/*
+ * Derrama un temporal vivo en la pila.
+ *
+ * El STORE pasa por emitir_instruccion(), por lo que tambien
+ * pasa por scheduler.c y posteriormente por el empaquetador VLIW.
+ */
+static int spill_guardar_temp(
+    Codegen *cg,
+    NodoAST *nodo,
+    int reg
+)
+{
+    if (!emitir_verificacion_pila(
+            cg,
+            nodo,
+            4
+        ) ||
+        !emitir_ajuste_sp(
+            cg,
+            -4
+        ) ||
+        !emitir_instruccion(
+            cg,
+            "LSU",
+            "STORE x%d, 0(x%d)",
+            reg,
+            REG_SP
+        ))
+        return 0;
+
+    liberar_temp(cg, reg);
+
+    cg->spill_stores++;
+
+    return 1;
+}
+
+/*
+ * Recupera el ultimo valor derramado.
+ */
+static int spill_recuperar_temp(
+    Codegen *cg,
+    NodoAST *nodo
+)
+{
+    int reg;
+
+    reg = reservar_temp(
+        cg,
+        nodo
+    );
+
+    if (reg < 0)
+        return -1;
+
+    if (!emitir_instruccion(
+            cg,
+            "LSU",
+            "LOAD x%d, 0(x%d)",
+            reg,
+            REG_SP
+        ) ||
+        !emitir_ajuste_sp(
+            cg,
+            4
+        )) {
+
+        liberar_temp(cg, reg);
+        return -1;
+    }
+
+    cg->spill_loads++;
+
+    return reg;
+}
+
+/*
  * Convencion final de llamadas acordada con Fase 3:
  *   x14 = SP
  *   x15 = FP
@@ -2014,14 +2180,72 @@ static int generar_expresion(Codegen *cg, NodoAST *nodo)
             strcmp(nodo->valor, "OR") == 0)
             return generar_booleano_desde_condicion(cg, nodo);
 
-        izq = generar_expresion(cg, hijo_n(nodo, 0));
-        if (izq < 0)
-            return -1;
+        {
+            NodoAST *nodo_der =
+                hijo_n(nodo, 1);
 
-        der = generar_expresion(cg, hijo_n(nodo, 1));
-        if (der < 0) {
-            liberar_temp(cg, izq);
+            int izq_en_spill = 0;
+
+            izq = generar_expresion(
+                cg,
+                hijo_n(nodo, 0)
+            );
+
+            if (izq < 0)
+                return -1;
+
+            /*
+             * Si el subarbol derecho requiere mas registros
+             * de los que quedan disponibles, guardamos el
+             * resultado izquierdo en memoria.
+             */
+            if (cg->config.habilitar_spilling &&
+                presion_expresion(nodo_der) >
+                    contar_temps_libres(cg)) {
+
+                if (!spill_guardar_temp(
+                        cg,
+                        nodo,
+                        izq
+                    )) {
+
+                    liberar_temp(cg, izq);
+                    return -1;
+                }
+
+                izq_en_spill = 1;
+            }
+
+            der = generar_expresion(
+                cg,
+                nodo_der
+            );
+
+            if (der < 0) {
+
+                if (!izq_en_spill)
+                    liberar_temp(cg, izq);
+
+                return -1;
+            }
+
+            /*
+             * Restauramos el valor izquierdo antes
+             * de ejecutar la operacion.
+             */
+            if (izq_en_spill) {
+
+                izq =
+                    spill_recuperar_temp(
+                        cg,
+                        nodo
+                    );
+
+                if (izq < 0) {
+                    liberar_temp(cg, der);
             return -1;
+        }
+            }
         }
 
         if (strcmp(nodo->valor, "+") == 0)
@@ -3030,6 +3254,14 @@ int codegen_generar_archivo(NodoAST *raiz,
     con NOPs de planificacion; el empaquetado VLIW ocurre posteriormente.
     */
     generar_nodo(&cg, raiz);
+
+    if (cg.config.habilitar_spilling) {
+        printf(
+            "[SPILL BACKEND] STORE=%zu LOAD=%zu\n",
+            cg.spill_stores,
+            cg.spill_loads
+        );
+    }
 
     if (!cg.encontro_principal)
         error_codegen(&cg, raiz, "no se encontro la funcion principal");

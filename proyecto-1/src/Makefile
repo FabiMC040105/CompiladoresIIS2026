@@ -44,15 +44,16 @@ HEADERS := ast.h tabla_simbolos.h memoria.h semantico.h \
            asm_emitter.h scheduler.h codegen.h codegen_tabla.h \
            resolucion_etiquetas.h etiquetas.h binario.h vliw_packer.h
 
-
-# Proyecto 2: IR, bloques basicos y optimizacion de codigo muerto.
-# Incluimos tambien el adaptador que conecta el IR con el CodeGen original.
+# Proyecto 2: IR, bloques basicos y optimizaciones.
+# Conservamos el backend IR y conectamos los modulos nuevos.
 SRC += ir.c ir_ast.c basic_blocks.c liveness.c dead_code_elimination.c \
-       codegen_ir.c
+       codegen_ir.c grafo_interferencia.c asignacion_registros.c spill_transform.c \
+       dependencias.c dag.c renombramiento.c reordenamiento.c optimizaciones_ir.c
 
-# Registramos los encabezados para que Make detecte sus cambios.
+# Registramos los encabezados para detectar cambios al recompilar.
 HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h \
-           codegen_ir.h
+           codegen_ir.h grafo_interferencia.h asignacion_registros.h spill_transform.h \
+           dependencias.h dag.h renombramiento.h reordenamiento.h optimizaciones_ir.h
 
 
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
@@ -207,7 +208,7 @@ test-semantico: $(TARGET)
 
 # Suite local, no depende de instalar/descargar Arquitectura.
 test: all test-etiquetas test-resolucion test-binario test-vliw \
-      test-scheduler test-memoria test-semantico
+      test-scheduler test-memoria test-semantico test-opt-modulos
 	@echo 'PASS: finalizaron las pruebas locales.'
 
 # ---------------------------------------------------------------
@@ -288,6 +289,7 @@ help:
 	  '  make test-resolucion             Saltos y resolucion de etiquetas' \
 	  '  make test-binario                Codificador binario' \
 	  '  make test-vliw                   Empaquetador VLIW' \
+	  '  make test-opt-modulos            Pruebas de las cuatro optimizaciones IR' \
 	  '  make test-scheduler              Dependencias y NOPs' \
 	  '  make test-semantico              34 pruebas semanticas' \
 	  '' \
@@ -303,7 +305,98 @@ help:
 	  'Ayuda del compilador: ./cdff --help' \
 	  '=========================================================='
 
+
 # Pruebas autocontenidas del backend IR (sin Flex/Bison/RTL).
 .PHONY: test-codegen-ir-backend
 test-codegen-ir-backend:
 	./probar_codegen_ir_backend.sh
+
+# ---------------------------------------------------------------
+#  grafo de interferencia y coloreo para spilling
+# ---------------------------------------------------------------
+$(TEST_DIR)/prueba_grafo_interferencia: \
+        pruebas/prueba_grafo_interferencia.c \
+        grafo_interferencia.c grafo_interferencia.h \
+        liveness.c liveness.h \
+        basic_blocks.c basic_blocks.h \
+        ir.c ir.h | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ \
+	    pruebas/prueba_grafo_interferencia.c \
+	    grafo_interferencia.c \
+	    liveness.c \
+	    basic_blocks.c \
+	    ir.c \
+	    $(LDFLAGS) $(LDLIBS)
+
+.PHONY: test-grafo-spill
+test-grafo-spill: $(TEST_DIR)/prueba_grafo_interferencia
+	./$(TEST_DIR)/prueba_grafo_interferencia
+
+# ---------------------------------------------------------------
+# Spilling register: transformacion y recoloreo
+# ---------------------------------------------------------------
+$(TEST_DIR)/prueba_spill_transform: \
+        pruebas/prueba_spill_transform.c \
+        spill_transform.c spill_transform.h \
+        asignacion_registros.c asignacion_registros.h \
+        grafo_interferencia.c grafo_interferencia.h \
+        dependencias.c dependencias.h \
+        liveness.c liveness.h \
+        basic_blocks.c basic_blocks.h \
+        ir.c ir.h | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ \
+	    pruebas/prueba_spill_transform.c \
+	    spill_transform.c \
+	    asignacion_registros.c \
+	    grafo_interferencia.c \
+	    dependencias.c \
+	    liveness.c \
+	    basic_blocks.c \
+	    ir.c \
+	    $(LDFLAGS) $(LDLIBS)
+
+.PHONY: test-spill
+test-spill: $(TEST_DIR)/prueba_spill_transform
+	./$(TEST_DIR)/prueba_spill_transform
+
+# Pruebas aisladas de integracion IR: no requieren Flex/Bison.
+IR_OPT_TEST_SOURCES := ir.c ir_ast.c ast.c basic_blocks.c liveness.c \
+    dead_code_elimination.c dependencias.c dag.c renombramiento.c \
+    reordenamiento.c grafo_interferencia.c asignacion_registros.c \
+    spill_transform.c optimizaciones_ir.c
+
+$(TEST_DIR)/prueba_integracion_opt_ir: pruebas/prueba_integracion_opt_ir.c $(IR_OPT_TEST_SOURCES) $(HEADERS) | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ pruebas/prueba_integracion_opt_ir.c \
+	    $(IR_OPT_TEST_SOURCES) $(LDFLAGS) $(LDLIBS)
+
+.PHONY: test-opt-ir test-opt-modulos
+
+test-opt-ir: $(TEST_DIR)/prueba_integracion_opt_ir
+	./$(TEST_DIR)/prueba_integracion_opt_ir
+
+# Tests heredados de persona 3, ademas de spilling y del flujo integrado.
+test-opt-modulos: test-opt-ir test-spill test-grafo-spill
+
+$(TEST_DIR)/prueba_renombramiento: prueba_renombramiento.c \
+    renombramiento.c dag.c dependencias.c ir.c ir_ast.c ast.c basic_blocks.c | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+test-renombramiento: $(TEST_DIR)/prueba_renombramiento
+	./$(TEST_DIR)/prueba_renombramiento
+
+$(TEST_DIR)/prueba_reordenamiento: prueba_reordenamiento.c \
+    reordenamiento.c renombramiento.c dag.c dependencias.c ir.c ir_ast.c ast.c basic_blocks.c | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+test-reordenamiento: $(TEST_DIR)/prueba_reordenamiento
+	./$(TEST_DIR)/prueba_reordenamiento
+
+DCE_REGRESIONES := $(patsubst pruebas/%.c,$(TEST_DIR)/%,$(wildcard pruebas/test_dce*.c))
+$(DCE_REGRESIONES): $(TEST_DIR)/%: pruebas/%.c ir.c basic_blocks.c liveness.c dead_code_elimination.c | $(TEST_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+test-dce-ir: $(DCE_REGRESIONES)
+	@for t in $(DCE_REGRESIONES); do "./$$t" || exit $$?; done
+
+.PHONY: test-renombramiento test-reordenamiento test-dce-ir
+test-opt-modulos: test-renombramiento test-reordenamiento test-dce-ir
