@@ -56,6 +56,20 @@ HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h \
            dependencias.h dag.h renombramiento.h reordenamiento.h optimizaciones_ir.h
 
 
+# Proyecto 2: optimizacion Loop Unrolling.
+# Se incorpora a las fases IR existentes.
+SRC += loop_unrolling.c
+HEADERS += loop_unrolling.h
+
+# Pruebas de la optimizacion Loop Unrolling.
+# Verifican que el IR transformado conserve los resultados.
+.PHONY: test-loop-unrolling
+test-loop-unrolling:
+	@mkdir -p evidencia-vliw/.make-tests
+	$(CC) $(CFLAGS) -I. -o evidencia-vliw/.make-tests/test_loop_unrolling \
+		pruebas/test_loop_unrolling.c loop_unrolling.c ir.c basic_blocks.c
+	./evidencia-vliw/.make-tests/test_loop_unrolling
+
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
         simbolos arbol ast resolver wave check-bin \
         test test-etiquetas test-resolucion test-integracion-etiquetas \

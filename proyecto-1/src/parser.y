@@ -32,6 +32,7 @@ entre el lexer y el parser.
 #include "dead_code_elimination.h"
 #include "codegen_ir.h"
 #include "optimizaciones_ir.h"
+#include "loop_unrolling.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1513,6 +1514,7 @@ static void mostrar_uso(FILE *f)
         "  --renombrar-ir  Renombra definiciones y temporales del IR.\n"
         "  --reordenar-ir  Reordena instrucciones según dependencias.\n"
         "  --opt-ir        Activa las cuatro optimizaciones del IR.\n"
+        "  --unroll N      Desenrolla ciclos con factor de 2 a 16 (requiere --ir-cfg).\n"
         "  -h, --help      Muestra esta ayuda.\n");
 }
 
@@ -1585,6 +1587,7 @@ int main(int argc, char *argv[])
     // Estas fases se aplicarán tanto al IR mostrado
     // como al IR utilizado para generar ensamblador.
     unsigned fases_ir_activas = 0;
+    unsigned factor_unroll = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1633,6 +1636,30 @@ int main(int argc, char *argv[])
         // Activa las cuatro fases de optimización del IR.
         else if (strcmp(argv[i], "--opt-ir") == 0)
             fases_ir |= OPT_IR_TODAS;
+        // Activamos Loop Unrolling con un factor configurable.
+        else if (strcmp(argv[i], "--unroll") == 0)
+        {
+            char *fin = NULL;
+            long factor;
+
+            if (++i >= argc)
+            {
+                fprintf(stderr, "Error: --unroll requiere un factor.\n");
+                return EXIT_FAILURE;
+            }
+
+            factor = strtol(argv[i], &fin, 10);
+
+            if (fin == argv[i] || *fin != '\0' ||
+                factor < 2 || factor > 16)
+            {
+                fprintf(stderr,
+                        "Error: el factor debe estar entre 2 y 16.\n");
+                return EXIT_FAILURE;
+            }
+
+            factor_unroll = (unsigned)factor;
+        }
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1675,6 +1702,14 @@ int main(int argc, char *argv[])
     En ese modo no ejecuta el lexer, parser ni semantico y genera
     el archivo .bin mediante el ensamblador integrado.
     */
+    // Por ahora, Loop Unrolling se utiliza en el análisis del CFG.
+    if (factor_unroll && !opcion_ir_cfg)
+    {
+        fprintf(stderr,
+                "Error: --unroll requiere --ir-cfg por ahora.\n");
+        return EXIT_FAILURE;
+    }
+
     if (opcion_ensamblar)
     {
         if (archivo_fuente != NULL) {
@@ -1878,6 +1913,47 @@ int main(int argc, char *argv[])
                 }
 
                 ok_cfg = 1;
+
+                // Desenrollamos los ciclos antes de aplicar las
+                // demás optimizaciones solicitadas.
+                if (factor_unroll > 0)
+                {
+                    IRProgram ir_optimizada;
+                    LoopUnrollConfig config = {0};
+                    LoopUnrollStats stats = {0};
+
+                    config.factor = factor_unroll;
+                    ir_init(&ir_optimizada);
+
+                    printf("\n=== IR ORIGINAL ===\n");
+                    ir_print(&programa_ir, stdout);
+
+                    if (!loop_unroll(&programa_ir, &ir_optimizada,
+                                     &config, &stats))
+                    {
+                        fprintf(stderr,
+                                "Error al aplicar Loop Unrolling.\n");
+                        ir_free(&ir_optimizada);
+                        ir_free(&programa_ir);
+                        goto error_compilacion;
+                    }
+
+                    printf("\n=== IR OPTIMIZADA (factor %u) ===\n",
+                           factor_unroll);
+                    ir_print(&ir_optimizada, stdout);
+
+                    printf("\n=== ESTADISTICAS LOOP UNROLLING ===\n");
+                    printf("Ciclos encontrados: %zu\n", stats.loops_found);
+                    printf("Ciclos desenrollados: %zu\n", stats.loops_unrolled);
+                    printf("Ciclos omitidos: %zu\n", stats.loops_skipped);
+                    printf("Instrucciones antes: %zu\n",
+                           stats.instructions_before);
+                    printf("Instrucciones despues: %zu\n",
+                           stats.instructions_after);
+
+                    ir_free(&programa_ir);
+                    programa_ir = ir_optimizada;
+                }
 
                 // Aplicamos las optimizaciones solicitadas sobre el IR.
                 // Si no se seleccionó ninguna fase, conservamos el IR original.
