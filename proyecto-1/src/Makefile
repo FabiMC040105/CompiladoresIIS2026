@@ -47,6 +47,9 @@ HEADERS := ast.h tabla_simbolos.h memoria.h semantico.h \
 # Proyecto 2: representacion intermedia y CFG
 SRC += ir.c ir_ast.c basic_blocks.c
 HEADERS += ir.h basic_blocks.h
+# Proyecto 2: optimizacion Loop Unrolling
+SRC += loop_unrolling.c
+HEADERS += loop_unrolling.h
 
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
         simbolos arbol ast resolver wave check-bin \

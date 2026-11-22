@@ -29,6 +29,7 @@ entre el lexer y el parser.
 #include "vliw_packer.h"
 #include "ir.h"
 #include "basic_blocks.h"
+#include "loop_unrolling.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1561,6 +1562,7 @@ int main(int argc, char *argv[])
     int resultado;
     int opcion_ir_cfg = 0;
     int opcion_emit_ir = 0;
+    unsigned factor_unroll = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1588,6 +1590,28 @@ int main(int argc, char *argv[])
             opcion_ir_cfg = 1;
         else if (strcmp(argv[i], "--emit-ir") == 0)
             opcion_emit_ir = 1;
+        else if (strcmp(argv[i], "--unroll") == 0)
+        {
+            char *fin = NULL;
+            long factor;
+
+            if (++i >= argc)
+            {
+                fprintf(stderr, "Error: --unroll requiere un factor.\n");
+                return EXIT_FAILURE;
+            }
+
+            factor = strtol(argv[i], &fin, 10);
+
+            if (fin == argv[i] || *fin != '\0' ||
+                factor < 2 || factor > 16)
+            {
+                fprintf(stderr, "Error: el factor debe estar entre 2 y 16.\n");
+                return EXIT_FAILURE;
+            }
+
+            factor_unroll = (unsigned)factor;
+        }
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1624,6 +1648,14 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
     }
+
+    if (factor_unroll && !opcion_ir_cfg)
+    {
+        fprintf(stderr,
+                "Error: --unroll requiere --ir-cfg por ahora.\n");
+        return EXIT_FAILURE;
+    }
+
 
     /*
     Cuando se utiliza -x, cdff recibe directamente un archivo .asm.
@@ -1825,6 +1857,44 @@ int main(int argc, char *argv[])
                 }
 
                 ok_cfg = 1;
+
+
+                /* Proyecto 2: Loop Unrolling */
+                if (factor_unroll > 0)
+                {
+                    IRProgram ir_optimizada;
+                    LoopUnrollConfig config = {0};
+                    LoopUnrollStats stats = {0};
+
+                    config.factor = factor_unroll;
+                    ir_init(&ir_optimizada);
+
+                    printf("\n=== IR ORIGINAL ===\n");
+                    ir_print(&programa_ir, stdout);
+
+                    if (!loop_unroll(&programa_ir, &ir_optimizada,
+                                    &config, &stats))
+                    {
+                        fprintf(stderr, "Error al aplicar Loop Unrolling.\n");
+                        ir_free(&ir_optimizada);
+                        ir_free(&programa_ir);
+                        goto error_compilacion;
+                    }
+
+                    printf("\n=== IR OPTIMIZADA (factor %u) ===\n",
+                        factor_unroll);
+                    ir_print(&ir_optimizada, stdout);
+
+                    printf("\n=== ESTADISTICAS LOOP UNROLLING ===\n");
+                    printf("Ciclos encontrados: %zu\n", stats.loops_found);
+                    printf("Ciclos desenrollados: %zu\n", stats.loops_unrolled);
+                    printf("Ciclos omitidos: %zu\n", stats.loops_skipped);
+                    printf("Instrucciones antes: %zu\n", stats.instructions_before);
+                    printf("Instrucciones despues: %zu\n", stats.instructions_after);
+
+                    ir_free(&programa_ir);
+                    programa_ir = ir_optimizada;
+                }
 
                 /* Envia la IR al IDE entre marcadores. */
                 if (opcion_emit_ir)
