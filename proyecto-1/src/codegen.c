@@ -3525,6 +3525,47 @@ int codegen_motor_finalizar_funcion(
  * Primero comprobamos si hubo errores de generacion y luego
  * verificamos si el archivo se pudo cerrar correctamente.
  */
+/* Utiliza las mismas rutinas ISA del generador AST para el backend IR.
+   Reserva las entradas mientras el algoritmo adquiere auxiliares y luego
+   libera todos los registros internos sin afectar las reservas del AST. */
+int codegen_motor_operacion_entera(CodegenMotor *motor,
+                                   CodegenOperacionEntera operacion,
+                                   int reg_izq, int reg_der, int reg_resultado)
+{
+    Codegen *cg;
+    int reg_calculado = -1;
+    int ok = 0;
+    if (!motor || reg_izq < REG_TEMP_PRIMERO || reg_izq > REG_TEMP_ULTIMO ||
+        reg_der < REG_TEMP_PRIMERO || reg_der > REG_TEMP_ULTIMO ||
+        reg_resultado < REG_TEMP_PRIMERO || reg_resultado > REG_TEMP_ULTIMO ||
+        reg_izq == reg_der) return 0;
+    cg = &motor->cg;
+    /* El motor IR no usa el asignador de registros temporales del AST. */
+    memset(cg->temp_ocupado, 0, sizeof(cg->temp_ocupado));
+    cg->temp_ocupado[reg_izq] = 1;
+    cg->temp_ocupado[reg_der] = 1;
+    switch (operacion) {
+    case CODEGEN_ENTERA_MUL:
+        reg_calculado = generar_multiplicacion(cg, NULL, reg_izq, reg_der);
+        break;
+    case CODEGEN_ENTERA_DIV:
+        reg_calculado = generar_division_modulo(cg, NULL, reg_izq, reg_der, 0);
+        break;
+    case CODEGEN_ENTERA_MOD:
+        reg_calculado = generar_division_modulo(cg, NULL, reg_izq, reg_der, 1);
+        break;
+    case CODEGEN_ENTERA_POW:
+        reg_calculado = generar_potencia(cg, NULL, reg_izq, reg_der);
+        break;
+    default: break;
+    }
+    if (reg_calculado >= 0)
+        ok = emitir_instruccion(cg, "ALU", "ADD x%d, x%d, x0",
+                               reg_resultado, reg_calculado);
+    memset(cg->temp_ocupado, 0, sizeof(cg->temp_ocupado));
+    return ok;
+}
+
 int codegen_motor_cerrar(CodegenMotor *motor)
 {
     int correcto;

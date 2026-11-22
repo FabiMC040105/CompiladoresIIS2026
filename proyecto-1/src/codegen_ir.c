@@ -1070,7 +1070,7 @@ static int comparar_ir(EstadoIR *e, IROp op)
     case IR_NE: salto = "BNE"; break;
     case IR_LE: salto = "BLE"; break;
     case IR_GE: salto = "BGE"; break;
-    case IR_LT: salto = "BGE"; izq = IR_R2; der = IR_R1; break; /* b >= a no equivale a a < b si son iguales: usar BLE con b,a y negar igualdad */
+    case IR_LT: salto = "BLE"; izq = IR_R1; der = IR_R2; break; /* a < b equivale a (a <= b) y (a != b). */
     case IR_GT: salto = "BGE"; izq = IR_R1; der = IR_R2; break;
     default: return 0;
     }
@@ -1200,6 +1200,87 @@ static int llamar_ir(EstadoIR *e, const IRInstruction *i)
 
     e->cantidad_argumentos = 0;
     return !i->result || guardar(e, i->result, 2);
+}
+
+/* Las intrinsecas FEIST son instrucciones del procesador, no funciones de usuario. */
+static int es_feist_ir(const char *nombre)
+{
+    return nombre && (!strcmp(nombre, "feist_auth") ||
+                      !strcmp(nombre, "feist_kstore") ||
+                      !strcmp(nombre, "feist_fround") ||
+                      !strcmp(nombre, "feist_logout"));
+}
+
+/* Los campos de llave, ronda y modo deben ser literales del AST. */
+static int inmediato_feist_ir(const NodoAST *n, int maximo)
+{
+    int32_t valor;
+    if (!n || n->tipo != AST_NUMERO || !numero(n->valor, &valor) ||
+        valor < 0 || valor > maximo) return -1;
+    return (int)valor;
+}
+
+static int traducir_feist_ir(EstadoIR *e, const IRInstruction *i)
+{
+    const NodoAST *args[7] = {0}, *actual;
+    size_t cantidad = 0, n = e->cantidad_argumentos;
+    char *fin;
+    long declarados;
+    int llave, ronda, modo;
+    const char *nombre = i->arg1;
+    int ok = 0;
+
+    if (!i->arg2 || !nombre || !i->nodo_origen ||
+        i->nodo_origen->tipo != AST_LLAMADA)
+        return fallo(e, i, "llamada FEIST sin informacion de origen");
+    declarados = strtol(i->arg2, &fin, 10);
+    if (*fin || declarados < 0 || declarados > 7 || (size_t)declarados != n)
+        return fallo(e, i, "cantidad de argumentos FEIST incompatible");
+    for (actual = i->nodo_origen->hijo; actual; actual = actual->siguiente) {
+        if (cantidad >= 7) return fallo(e, i, "demasiados argumentos FEIST");
+        args[cantidad++] = actual;
+    }
+    if (cantidad != n) return fallo(e, i, "argumentos AST e IR no coinciden");
+
+    if (!strcmp(nombre, "feist_logout")) {
+        if (n != 0) return fallo(e, i, "LOGOUT no recibe argumentos");
+        ok = emitir(e, "FEIST", "LOGOUT");
+    } else if (!strcmp(nombre, "feist_auth")) {
+        if (n != 2) return fallo(e, i, "AUTH requiere dos argumentos");
+        ok = cargar(e, e->argumentos[0], 4) &&
+             cargar(e, e->argumentos[1], 5) &&
+             emitir(e, "FEIST", "AUTH x4, x5");
+    } else if (!strcmp(nombre, "feist_kstore")) {
+        if (n != 3) return fallo(e, i, "KSTORE requiere tres argumentos");
+        llave = inmediato_feist_ir(args[0], 3);
+        ronda = inmediato_feist_ir(args[1], 3);
+        if (llave < 0 || ronda < 0)
+            return fallo(e, i, "KSTORE requiere llave y ronda literales 0..3");
+        ok = cargar(e, e->argumentos[2], 4) &&
+             emitir(e, "FEIST", "KSTORE %d, %d, x4", llave, ronda);
+    } else if (!strcmp(nombre, "feist_fround")) {
+        if (n != 7) return fallo(e, i, "FROUND requiere siete argumentos");
+        llave = inmediato_feist_ir(args[4], 3);
+        ronda = inmediato_feist_ir(args[5], 3);
+        modo = inmediato_feist_ir(args[6], 1);
+        if (llave < 0 || ronda < 0 || modo < 0 ||
+            !args[0] || !args[1] ||
+            args[0]->tipo != AST_VARIABLE || args[1]->tipo != AST_VARIABLE ||
+            !args[0]->valor || !args[1]->valor ||
+            !strcmp(args[0]->valor, args[1]->valor))
+            return fallo(e, i, "destinos o inmediatos FROUND invalidos");
+        /* Las fuentes IR ya fueron evaluadas antes de emitir los IR_PARAM.
+           Los registros de salida x7 y x8 son diferentes de las fuentes. */
+        ok = cargar(e, e->argumentos[2], 4) &&
+             cargar(e, e->argumentos[3], 5) &&
+             emitir(e, "FEIST", "FROUND x7, x8, x4, x5, %d, %d, %d",
+                    llave, ronda, modo) &&
+             guardar(e, args[0]->valor, 7) &&
+             guardar(e, args[1]->valor, 8);
+    }
+    if (!ok) return fallo(e, i, "no se pudo emitir la instruccion FEIST");
+    e->cantidad_argumentos = 0;
+    return 1;
 }
 
 /* Calcula la base real de una lista o matriz, incluyendo parametros por referencia. */
@@ -1332,6 +1413,23 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
 
 
 
+        /* Una lista/matriz usada como argumento se pasa por referencia.
+           ir_ast genera una copia a %tN para congelar argumentos; en este
+           caso copiamos la DIRECCION base, no un elemento de la lista. */
+        if (es_temporal(i->result) && !es_temporal(i->arg1)) {
+            CodegenSimbolo origen = {0};
+            if (e->config->resolver_ir &&
+                e->config->resolver_ir(e->config->contexto_ir, e->nodo_actual,
+                                       e->funcion, i->arg1, &origen) &&
+                (origen.forma == CODEGEN_FORMA_LISTA ||
+                 origen.forma == CODEGEN_FORMA_MATRIZ)) {
+                return base_indexada_ir(e, i, i->arg1,
+                          origen.forma == CODEGEN_FORMA_MATRIZ) &&
+                       emitir(e, "ALU", "ADD x%d, x%d, x0", IR_R1, IR_DIR) &&
+                       guardar(e, i->result, IR_R1);
+            }
+        }
+
         if (!cargar(e, i->arg1, IR_R1)) {
 
             fprintf(stderr,
@@ -1383,9 +1481,34 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
     case IR_SUB: operacion = "SUB"; break;
 
     case IR_MUL:
+        /* Reutilizamos la multiplicación del CodeGen original.
+           Esto evita duplicar el algoritmo en el backend IR. */
         return i->arg1 && i->arg2 && i->result &&
-               cargar(e, i->arg1, IR_R1) && cargar(e, i->arg2, IR_R2) &&
-               multiplicar_ir(e) && guardar(e, i->result, IR_RD);
+               cargar(e, i->arg1, IR_R1) &&
+               cargar(e, i->arg2, IR_R2) &&
+               codegen_motor_operacion_entera(
+                   e->motor,
+                   CODEGEN_ENTERA_MUL,
+                   IR_R1,
+                   IR_R2,
+                   IR_RD
+               ) &&
+               guardar(e, i->result, IR_RD);
+    case IR_DIV:
+    case IR_MOD:
+    case IR_POW:
+        /* Estas operaciones reutilizan las rutinas del CodeGen original.
+           Conservamos intactas las llamadas FEIST y el resto del backend IR. */
+        return i->arg1 && i->arg2 && i->result &&
+               cargar(e, i->arg1, IR_R1) &&
+               cargar(e, i->arg2, IR_R2) &&
+               codegen_motor_operacion_entera(
+                   e->motor,
+                   i->op == IR_DIV ? CODEGEN_ENTERA_DIV :
+                   i->op == IR_MOD ? CODEGEN_ENTERA_MOD : CODEGEN_ENTERA_POW,
+                   IR_R1, IR_R2, IR_RD
+               ) &&
+               guardar(e, i->result, IR_RD);
     case IR_EQ: case IR_NE: case IR_LT: case IR_LE: case IR_GT: case IR_GE:
         return i->arg1 && i->arg2 && i->result &&
                cargar(e, i->arg1, IR_R1) && cargar(e, i->arg2, IR_R2) &&
@@ -1624,7 +1747,7 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
         return 1;
 
     case IR_CALL:
-        return llamar_ir(e, i);
+        return es_feist_ir(i->arg1) ? traducir_feist_ir(e, i) : llamar_ir(e, i);
 
     case IR_ARRAY_DECL:
     case IR_MATRIX_DECL:

@@ -180,6 +180,18 @@ int codegen_motor_finalizar_funcion(
 /*
  * Finaliza la generacion y libera los recursos del motor.
  */
+/* Operaciones enteras sin opcode nativo, compartidas con el backend AST.
+   Las entradas son registros temporales; el resultado se copia al destino. */
+typedef enum {
+    CODEGEN_ENTERA_MUL,
+    CODEGEN_ENTERA_DIV,
+    CODEGEN_ENTERA_MOD,
+    CODEGEN_ENTERA_POW
+} CodegenOperacionEntera;
+int codegen_motor_operacion_entera(CodegenMotor *motor,
+                                   CodegenOperacionEntera operacion,
+                                   int reg_izq, int reg_der, int reg_resultado);
+
 int codegen_motor_cerrar(CodegenMotor *motor);
 
 /* ------------------------------------------ NUEVO -----------------------------------------*/

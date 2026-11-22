@@ -302,3 +302,8 @@ help:
 	  'Variables: FILE=..., ASM=..., OUT=..., ARGS=..., ARQ_ROOT=...' \
 	  'Ayuda del compilador: ./cdff --help' \
 	  '=========================================================='
+
+# Pruebas autocontenidas del backend IR (sin Flex/Bison/RTL).
+.PHONY: test-codegen-ir-backend
+test-codegen-ir-backend:
+	./probar_codegen_ir_backend.sh
