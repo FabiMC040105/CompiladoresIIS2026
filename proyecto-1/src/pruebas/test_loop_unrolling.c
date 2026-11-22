@@ -6,9 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Memoria sencilla para simular las variables y sus valores */
 typedef struct { char name[64]; long value; } Cell;
 typedef struct { Cell cells[256]; size_t count; } Memory;
 
+/* Leo un numero directo o busco una variable en la memoria de prueba */
 static long read_value(Memory *mem, const char *operand)
 {
     char *end;
@@ -23,6 +25,7 @@ static long read_value(Memory *mem, const char *operand)
     return 0;
 }
 
+/* Actualizo el valor de una variable o la agrego si no existe */
 static void write_value(Memory *mem, const char *name, long value)
 {
     size_t i;
@@ -38,6 +41,7 @@ static void write_value(Memory *mem, const char *name, long value)
     mem->cells[mem->count++].value = value;
 }
 
+/* Busco la etiqueta a la que tiene que saltar el interprete */
 static size_t label_position(const IRProgram *p, const char *label)
 {
     size_t i;
@@ -49,8 +53,8 @@ static size_t label_position(const IRProgram *p, const char *label)
     return 0;
 }
 
-/* Interprete minimo para comparar el resultado de la IR antes y despues.
-   Solamente interpreta las operaciones presentes en estas pruebas. */
+/* Interprete pequeño para ejecutar las instrucciones que pruebo aqui
+   No reemplaza al procesador VLIW, solo compara resultados de la IR */
 static long run_program(const IRProgram *p)
 {
     Memory mem = {0};
@@ -96,6 +100,8 @@ static long run_program(const IRProgram *p)
     return 0;
 }
 
+/* Construyo un ciclo en IR para probarlo sin depender del parser
+   Puedo cambiar el limite, usar una variable o agregar un salto interno */
 static void create_loop(IRProgram *p, long n, int variable_bound, int early_exit)
 {
     char limit[32];
@@ -121,6 +127,8 @@ static void create_loop(IRProgram *p, long n, int variable_bound, int early_exit
 #undef ADD
 }
 
+/* Corro la IR original y la nueva para revisar que den la misma suma
+   Tambien reviso si la heuristica desenrollo o conservo el ciclo */
 static void test_equivalent(long n, int variable_bound, unsigned factor, int show)
 {
     IRProgram original, optimized;
@@ -132,8 +140,15 @@ static void test_equivalent(long n, int variable_bound, unsigned factor, int sho
     ir_init(&optimized);
     assert(run_program(&original) == expected);
     assert(loop_unroll(&original, &optimized, &cfg, &stats) == 1);
-    assert(stats.loops_found == 1 && stats.loops_unrolled == 1);
-    assert(optimized.count > original.count);
+    /* Los ciclos constantes de 0 o 1 vueltas se dejan como estaban */
+    int should_unroll = variable_bound || n >= (long)factor;
+
+    assert(stats.loops_found == 1);
+    assert(stats.loops_unrolled == (size_t)should_unroll);
+    if (should_unroll)
+        assert(optimized.count > original.count);
+    else
+        assert(optimized.count == original.count);
     assert(run_program(&optimized) == expected);
     graph = bb_build(&optimized);
     assert(graph && bb_build_cfg(graph));
@@ -148,6 +163,7 @@ static void test_equivalent(long n, int variable_bound, unsigned factor, int sho
     ir_free(&original);
 }
 
+/* Pruebo que un rompa o un cuerpo demasiado grande no se copien */
 static void test_unsafe_and_heuristic(void)
 {
     IRProgram original, result;
@@ -172,12 +188,16 @@ static void test_unsafe_and_heuristic(void)
     ir_free(&original);
 }
 
+/* Casos que usamos para ver limites, sobrantes y ciclos grandes */
 int main(void)
 {
-    test_equivalent(6, 0, 2, 1);     /* Iteraciones constantes. */
-    test_equivalent(5, 1, 4, 0);     /* Limite en variable y residuo. */
-    test_equivalent(1000, 1, 8, 0); /* Numero grande de iteraciones. */
-    test_unsafe_and_heuristic();
+    test_equivalent(0, 0, 4, 0);    /* No entra al ciclo */
+    test_equivalent(1, 0, 4, 0);    /* Solo una iteracion */
+    test_equivalent(6, 0, 2, 1);    /* Factor 2 y limite constante */
+    test_equivalent(5, 1, 4, 0);    /* Limite en variable, queda sobrante */
+    test_equivalent(13, 0, 4, 0);   /* No es multiplo de 4 */
+    test_equivalent(1000, 1, 8, 0); /* Muchas iteraciones */
+    test_unsafe_and_heuristic();    /* Casos que no quiero modificar */
     puts("PASS: Loop Unrolling y equivalencia de resultados");
     return 0;
 }

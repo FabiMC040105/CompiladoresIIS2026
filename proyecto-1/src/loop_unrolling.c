@@ -2,27 +2,31 @@
 #include "basic_blocks.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* Guardo el temporal original y el nombre nuevo de cada copia */
 typedef struct {
     const char *old_name;
     char *new_name;
 } TempRename;
 
+/* Las posiciones que necesito para encontrar el inicio y el final del ciclo */
 typedef struct {
     size_t start;
     size_t condition_jump;
     size_t latch;
 } LoopMatch;
 
+/* Comparo cadenas sin intentar leer un puntero nulo */
 static int eq(const char *a, const char *b)
 {
     return a && b && strcmp(a, b) == 0;
 }
 
-/* En nuestra IR, los temporales internos llevan el prefijo %t. */
+/* Reviso si un nombre corresponde a un temporal nuestro, como %t3 */
 static int is_temp(const char *s)
 {
     if (!s || s[0] != '%' || s[1] != 't' || !isdigit((unsigned char)s[2]))
@@ -32,7 +36,8 @@ static int is_temp(const char *s)
     return 1;
 }
 
-/* Distingue destinos de datos de etiquetas de salto. */
+/* Solo tomo operaciones normales que producen un resultado
+   Los saltos y las escrituras a memoria necesitan otro tratamiento */
 static int is_pure_assignment(IROp op)
 {
     switch (op) {
@@ -46,6 +51,66 @@ static int is_pure_assignment(IROp op)
     }
 }
 
+
+/*
+   Esta es una primera regla para no agrandar ciclos muy cortos
+   Solo intenta reconocer una comparacion i < N con N constante
+   y busca que i se haya inicializado en 0 antes de entrar al ciclo
+   Si no reconoce ese caso deja que el resto del analisis decida
+*/
+static int skip_short_constant_loop(
+    const IRProgram *p,
+    size_t start,
+    size_t branch,
+    unsigned factor)
+{
+    const IRInstruction *cmp;
+    char *end;
+    long bound;
+    size_t j;
+
+    if (branch <= start + 1)
+        return 0;
+
+    cmp = &p->instructions[branch - 1];
+
+    if (cmp->op != IR_LT ||
+        !eq(cmp->result, p->instructions[branch].arg1) ||
+        !cmp->arg1 || !cmp->arg2)
+        return 0;
+
+    errno = 0;
+    bound = strtol(cmp->arg2, &end, 10);
+
+    if (errno || end == cmp->arg2 || *end != '\0' ||
+        bound < 0 || (unsigned long)bound >= factor)
+        return 0;
+
+    /* Busco la ultima asignacion al contador antes del ciclo */
+    for (j = start; j > 0;)
+    {
+        const IRInstruction *v = &p->instructions[--j];
+
+        if (v->op == IR_FUNC_BEGIN ||
+            v->op == IR_LABEL ||
+            v->op == IR_GOTO ||
+            v->op == IR_IF_TRUE ||
+            v->op == IR_IF_FALSE)
+            break;
+
+        if (v->op == IR_COPY && eq(v->result, cmp->arg1))
+            return eq(v->arg1, "0");
+
+        if (is_pure_assignment(v->op) &&
+            eq(v->result, cmp->arg1))
+            break;
+    }
+
+    return 0;
+}
+
+/* Agrego una instruccion copiando sus datos y la linea de origen
+   ir_emit_ex reserva la memoria de las cadenas por nosotros */
 static int emit_copy(IRProgram *out, const IRInstruction *v,
                      const char *a, const char *b, const char *r,
                      const char *extra)
@@ -53,11 +118,13 @@ static int emit_copy(IRProgram *out, const IRInstruction *v,
     return ir_emit_ex(out, v->op, a, b, r, extra, v->source_line);
 }
 
+/* Esta copia queda igual, no hace renombramiento */
 static int raw_copy(IRProgram *out, const IRInstruction *v)
 {
     return emit_copy(out, v, v->arg1, v->arg2, v->result, v->extra);
 }
 
+/* Busco a que bloque basico pertenece una instruccion de la IR */
 static size_t containing_block(const BasicBlockCFG *cfg, size_t instruction)
 {
     size_t i;
@@ -68,6 +135,8 @@ static size_t containing_block(const BasicBlockCFG *cfg, size_t instruction)
     return SIZE_MAX;
 }
 
+/* Confirmo en el CFG que hay una conexion del final al inicio
+   Sin ese regreso no tratamos el fragmento como un ciclo */
 static int has_backedge(const BasicBlockCFG *cfg, size_t start, size_t latch)
 {
     size_t a = containing_block(cfg, latch);
@@ -80,10 +149,9 @@ static int has_backedge(const BasicBlockCFG *cfg, size_t start, size_t latch)
     return 0;
 }
 
-/* Encuentra ciclos de la forma:
-   LABEL inicio; [evaluar condicion]; IF_FALSE cond, salida;
-   [cuerpo sin saltos internos]; GOTO inicio; LABEL salida.
-   Los casos complejos quedan intactos: nunca se transforman a ciegas. */
+/* Busco ciclos con la forma que genera actualmente ir_ast.c
+   Etiqueta, condicion, cuerpo, salto al inicio y etiqueta de salida
+   Si tiene rompa, saltos internos o algo que no manejo lo dejo igual */
 static int find_simple_loop(const IRProgram *p, const BasicBlockCFG *cfg,
                             size_t start, size_t max_body, size_t max_extra,
                             unsigned factor, LoopMatch *match)
@@ -112,20 +180,24 @@ static int find_simple_loop(const IRProgram *p, const BasicBlockCFG *cfg,
     exit_label = p->instructions[latch + 1].result;
     if (!eq(p->instructions[branch].result, exit_label)) return 0;
     if (!has_backedge(cfg, start, latch)) return 0;
+
+    /* No expando los ciclos cortos que la heuristica reconoce */
+    if (skip_short_constant_loop(p, start, branch, factor))
+        return 0;
     if (latch - branch - 1 > max_body) return 0;
 
-    /* Solo soportamos un salto condicional de salida, sin saltos anidados. */
+    /* No puedo copiar a ciegas un cuerpo con saltos internos */
     for (i = start + 1; i < latch; ++i) {
         const IRInstruction *v = &p->instructions[i];
         if (i == branch) continue;
         if (!is_pure_assignment(v->op)) return 0;
     }
 
-    /* Evitar sobrecrecimiento y desbordamientos. */
+    /* Evito que el codigo crezca demasiado segun el factor elegido */
     if (latch - start - 1 > max_extra / (factor - 1)) return 0;
 
-    /* Cada temporal interno debe definirse una unica vez, antes de usarse.
-       Si es un valor que atraviesa iteraciones, no es seguro renombrarlo. */
+    /* Reviso los temporales para no cambiar valores que se usan
+       en otra iteracion o fuera del ciclo */
     for (i = start + 1; i < latch; ++i) {
         const IRInstruction *v = &p->instructions[i];
         size_t j;
@@ -138,7 +210,7 @@ static int find_simple_loop(const IRProgram *p, const BasicBlockCFG *cfg,
                            eq(w->extra, v->result)))
                 return 0;
         }
-        /* Un temporal definido en el ciclo no debe usarse fuera del ciclo. */
+        /* Un temporal del ciclo no puede necesitarse despues de salir */
         for (j = 0; j < p->count; ++j) {
             const IRInstruction *w = &p->instructions[j];
             if (j >= start + 1 && j < latch) continue;
@@ -152,8 +224,8 @@ static int find_simple_loop(const IRProgram *p, const BasicBlockCFG *cfg,
     return 1;
 }
 
-/* Reconoce nombres de temporales incluso si la IR se construyo a mano
-   sin actualizar el contador next_temp. */
+/* Reviso el numero mayor de los temporales existentes
+   Asi los nombres nuevos no chocan con los que ya tenia la IR */
 static void check_temp_counter(const char *name, size_t *next)
 {
     size_t number = 0;
@@ -167,6 +239,7 @@ static void check_temp_counter(const char *name, size_t *next)
     if (number < SIZE_MAX && *next <= number) *next = number + 1;
 }
 
+/* Si un temporal tiene nombre nuevo uso ese, si no lo dejo igual */
 static const char *renamed(const char *s, const TempRename *map, size_t count)
 {
     size_t i;
@@ -175,6 +248,7 @@ static const char *renamed(const char *s, const TempRename *map, size_t count)
     return s;
 }
 
+/* Libero los nombres que cree al duplicar una iteracion */
 static void free_renames(TempRename *map, size_t n)
 {
     size_t i;
@@ -182,6 +256,9 @@ static void free_renames(TempRename *map, size_t n)
     free(map);
 }
 
+/* Copio una iteracion completa del ciclo
+   La primera mantiene sus temporales y las otras crean nombres nuevos
+   El orden de las instrucciones se conserva */
 static int emit_iteration(const IRProgram *input, IRProgram *output,
                           const LoopMatch *loop, int first)
 {
@@ -220,6 +297,10 @@ static int emit_iteration(const IRProgram *input, IRProgram *output,
     return 1;
 }
 
+/* Esta es la funcion principal que van a llamar desde el compilador
+   Recibe una IR, el factor y los limites de crecimiento
+   Construye otra IR para no cambiar la original
+   Al final valida el nuevo CFG y guarda las estadisticas */
 int loop_unroll(const IRProgram *input, IRProgram *output,
                 const LoopUnrollConfig *config, LoopUnrollStats *stats)
 {
@@ -250,7 +331,7 @@ int loop_unroll(const IRProgram *input, IRProgram *output,
     cfg = bb_build(input);
     if (!cfg || !bb_build_cfg(cfg)) goto fail;
 
-    /* Contamos los saltos hacia atras, incluso los que luego se rechazan. */
+    /* Cuento los ciclos posibles aunque despues alguno sea omitido */
     for (i = 0; i < input->count; ++i) {
         const IRInstruction *v = &input->instructions[i];
         if (v->op != IR_GOTO || !v->result) continue;
@@ -263,6 +344,7 @@ int loop_unroll(const IRProgram *input, IRProgram *output,
         }
     }
 
+    /* Recorro la IR, duplico los ciclos seguros y copio el resto sin cambios */
     for (i = 0; i < input->count;) {
         LoopMatch match;
         if (input->instructions[i].op == IR_LABEL &&
@@ -280,7 +362,7 @@ int loop_unroll(const IRProgram *input, IRProgram *output,
         }
     }
 
-    /* Validamos los destinos de salto despues de transformar. */
+    /* Armo el CFG otra vez para revisar que los saltos sigan apuntando bien */
     verified = bb_build(&generated);
     if (!verified || !bb_build_cfg(verified)) goto fail;
     bb_free(verified);
@@ -294,6 +376,7 @@ int loop_unroll(const IRProgram *input, IRProgram *output,
     return 1;
 
 fail:
+    /* Si algo falla libero lo temporal y no entrego una IR incompleta */
     bb_free(verified);
     bb_free(cfg);
     ir_free(&generated);

@@ -4,8 +4,9 @@
 #include <stddef.h>
 #include "ir.h"
 
-/* El factor indica cuantas iteraciones ejecuta cada vuelta del ciclo
-   transformado. El limite de crecimiento evita expandir demasiado la IR. */
+/* Configuracion que recibe mi optimizador
+   factor indica cuantas copias del cuerpo intento hacer por vuelta
+   Los otros dos valores evitan que el codigo crezca demasiado */
 typedef struct {
     unsigned factor;                 /* 2, 4 u 8 (se admiten factores de 2 a 16). */
     size_t max_body_instructions;    /* 0: valor por defecto (32). */
@@ -13,17 +14,18 @@ typedef struct {
 } LoopUnrollConfig;
 
 typedef struct {
-    size_t loops_found;              /* Saltos hacia atras detectados. */
-    size_t loops_unrolled;           /* Ciclos transformados. */
-    size_t loops_skipped;            /* Ciclos conservados por seguridad o heuristica. */
+    size_t loops_found;              /* Ciclos que encontre en la IR */
+    size_t loops_unrolled;           /* Ciclos que si pude desenrollar */
+    size_t loops_skipped;            /* Ciclos que deje como estaban */
     size_t instructions_before;
     size_t instructions_after;
 } LoopUnrollStats;
 
-/* Recibe la IR original y entrega otra IR independiente.
-   La salida debe estar inicializada con ir_init() y ser distinta de input.
-   Retorna 1 si se completo (incluso si no habia ciclos aptos), 0 si fallo.
-   Ante error, output permanece intacto. No modifica input. */
+/* Funcion que usa el compilador para aplicar Loop Unrolling
+   input es la IR original y output guarda la version transformada
+   output debe inicializarse con ir_init y no puede ser el mismo input
+   Devuelve 1 si termino bien, incluso cuando no desenrollo nada
+   Si ocurre un error devuelve 0 y deja output sin cambios */
 int loop_unroll(const IRProgram *input, IRProgram *output,
                 const LoopUnrollConfig *config, LoopUnrollStats *stats);
 
