@@ -29,6 +29,7 @@ entre el lexer y el parser.
 #include "vliw_packer.h"
 #include "ir.h"
 #include "basic_blocks.h"
+#include "dead_code_elimination.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1561,6 +1562,8 @@ int main(int argc, char *argv[])
     int resultado;
     int opcion_ir_cfg = 0;
     int opcion_emit_ir = 0;
+    // Permite activar la optimizacion DCE desde la terminal.
+    int opcion_dce = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1588,6 +1591,9 @@ int main(int argc, char *argv[])
             opcion_ir_cfg = 1;
         else if (strcmp(argv[i], "--emit-ir") == 0)
             opcion_emit_ir = 1;
+        // Activamos DCE cuando el usuario solicita esta optimizacion
+        else if (strcmp(argv[i], "--dce") == 0)
+            opcion_dce = 1;
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1806,8 +1812,10 @@ int main(int argc, char *argv[])
     analisis semantico termino sin errores.
     */
             /* Proyecto 2: generacion de IR, bloques basicos y CFG */
+            // Generamos IR cuando necesitamos mostrarlo, analizar su CFG
+            // o ejecutar la optimizacion de codigo muerto.
             if (errores_semanticos == 0 &&
-                (opcion_ir_cfg || opcion_emit_ir))
+                (opcion_ir_cfg || opcion_emit_ir || opcion_dce))
             {
                 IRProgram programa_ir;
                 IRError error_ir = {0};
@@ -1825,6 +1833,24 @@ int main(int argc, char *argv[])
                 }
 
                 ok_cfg = 1;
+
+                // Ejecutamos DCE solamente cuando se solicita esta optimizacion.
+                // La funcion modifica el IR eliminando las instrucciones innecesarias.
+                if (opcion_dce)
+                {
+                    ResultadoDCE resultado_dce = {0};
+
+                    if (!eliminar_codigo_muerto(&programa_ir, &resultado_dce))
+                    {
+                        fprintf(stderr, "Error: fallo la optimizacion DCE.\n");
+
+                        ir_free(&programa_ir);
+                        goto error_compilacion;
+                    }
+
+                    // Mostramos las estadisticas para comprobar cuanto codigo eliminamos.
+                    mostrar_estadisticas_dce(&resultado_dce);
+                }
 
                 /* Envia la IR al IDE entre marcadores. */
                 if (opcion_emit_ir)
@@ -1851,7 +1877,7 @@ int main(int argc, char *argv[])
     de simbolos. Permite resolver referencias a identificadores del AST
     y consultar el ambito en el cual fue reconocido cada uno.
     */
-    
+
                 CodegenTablaContexto contexto_codegen;
                 CodegenConfig config_codegen = {0};
 
