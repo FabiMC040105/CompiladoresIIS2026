@@ -30,6 +30,7 @@ entre el lexer y el parser.
 #include "ir.h"
 #include "basic_blocks.h"
 #include "dead_code_elimination.h"
+#include "codegen_ir.h"
 
     /*
     Declaraciones para la comunicacion entre lexer y parser.
@@ -1564,6 +1565,8 @@ int main(int argc, char *argv[])
     int opcion_emit_ir = 0;
     // Permite activar la optimizacion DCE desde la terminal.
     int opcion_dce = 0;
+    // Permite probar el generador desde IR sin reemplazar el backend original.
+    int opcion_codegen_ir = 0;
     const char *archivo_fuente = NULL;
     const char *archivo_asm_directo = NULL;
     const char *salida_solicitada = NULL;
@@ -1594,6 +1597,9 @@ int main(int argc, char *argv[])
         // Activamos DCE cuando el usuario solicita esta optimizacion
         else if (strcmp(argv[i], "--dce") == 0)
             opcion_dce = 1;
+        // Activamos el backend experimental que traduce IR a ensamblador
+        else if (strcmp(argv[i], "--codegen-ir") == 0)
+            opcion_codegen_ir = 1;
         else if (strcmp(argv[i], "-o") == 0)
         {
             if (++i >= argc) {
@@ -1899,13 +1905,125 @@ int main(int argc, char *argv[])
     FASE 4: traduce el AST a ensamblador intermedio y aplica la
     calendarizacion de dependencias para el procesador VLIW.
     */
-                if (!codegen_generar_archivo(
-                        raiz, ruta_asm_intermedia, &config_codegen))
-                {
-                    fprintf(stderr,
-                            "Error: fallo la generacion de ensamblador.\n");
-                    goto error_compilacion;
-                }
+                
+    /*
+    * Seleccionamos el generador de codigo.
+    *
+    * El backend original sigue siendo el predeterminado.
+    * El nuevo backend IR se activa solamente cuando
+    * utilizamos la opcion --codegen-ir.
+    */
+    if (opcion_codegen_ir)
+    {
+        IRProgram programa_ir_codegen;
+        IRError error_ir_codegen = {0};
+        CodegenIRConfig config_ir = {0};
+        CodegenIREstadisticas estadisticas_ir = {0};
+        int generacion_correcta;
+
+        /*
+        * Generamos nuevamente el IR para esta fase.
+        * De momento lo hacemos aqui para mantener aislada
+        * la prueba del backend y no alterar el flujo original.
+        */
+        ir_init(&programa_ir_codegen);
+
+        if (!ir_generate(raiz, &programa_ir_codegen,
+                        &error_ir_codegen))
+        {
+            fprintf(stderr,
+                    "Error IR en linea %d: %s\n",
+                    error_ir_codegen.line,
+                    error_ir_codegen.message);
+
+            ir_free(&programa_ir_codegen);
+            goto error_compilacion;
+        }
+
+        /*
+        * Aplicamos DCE antes de generar el ensamblador.
+        * Asi las instrucciones eliminadas no llegan al
+        * backend IR.
+        */
+        if (opcion_dce)
+        {
+            ResultadoDCE resultado_dce = {0};
+
+            if (!eliminar_codigo_muerto(
+                    &programa_ir_codegen,
+                    &resultado_dce))
+            {
+                fprintf(stderr,
+                        "Error: fallo DCE para CodeGen IR.\n");
+
+                ir_free(&programa_ir_codegen);
+                goto error_compilacion;
+            }
+        }
+
+        /*
+        * Reutilizamos la configuracion original:
+        * memoria global y tabla de simbolos.
+        */
+        config_ir.original = config_codegen;
+
+        /*
+        * El resolvedor IR actual admite solamente
+        * variables globales. No intenta adivinar
+        * los ambitos de variables locales.
+        */
+        config_ir.resolver_ir = codegen_resolver_ir_global;
+        config_ir.contexto_ir = &contexto_codegen;
+
+        /*
+        * Traducimos el IR, ya optimizado cuando
+        * corresponde, al ensamblador intermedio.
+        */
+        generacion_correcta = codegen_ir_generar_archivo(
+            &programa_ir_codegen,
+            ruta_asm_intermedia,
+            &config_ir,
+            &estadisticas_ir
+        );
+
+        /*
+        * Liberamos el IR una vez terminada la
+        * generacion de ensamblador.
+        */
+        ir_free(&programa_ir_codegen);
+
+        if (!generacion_correcta)
+        {
+            fprintf(stderr,
+                    "Error: el backend IR no pudo generar ASM.\n");
+            goto error_compilacion;
+        }
+
+        if (opcion_verbose)
+        {
+            printf("Instrucciones IR procesadas: %zu\n",
+                estadisticas_ir.instrucciones_ir);
+
+            printf("Instrucciones traducidas: %zu\n",
+                estadisticas_ir.instrucciones_traducidas);
+        }
+    }
+    else
+    {
+        /*
+        * Conservamos el generador tradicional para
+        * todos los programas que no soliciten IR.
+        */
+        if (!codegen_generar_archivo(
+                raiz, ruta_asm_intermedia,
+                &config_codegen))
+        {
+            fprintf(stderr,
+                    "Error: fallo la generacion de ensamblador.\n");
+            goto error_compilacion;
+        }
+    }
+
 
                 if (opcion_verbose)
                     printf("[FASE 5] Resolviendo etiquetas y offsets...\n");

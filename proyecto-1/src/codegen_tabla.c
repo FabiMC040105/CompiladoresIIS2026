@@ -131,9 +131,36 @@ int codegen_resolver_desde_tabla(void *contexto,
     if (simbolo == NULL && ambito != NULL)
         simbolo = buscar_visible_desde(ctx->tabla, nombre, ambito);
 
-    /* Fallback seguro para nombres de funcion. */
+    /* ------------------------------------------ NUEVO -----------------------------------------*/
+    /* ------------------------------------------ NUEVO -----------------------------------------*/
+    /* ------------------------------------------ NUEVO -----------------------------------------*/ 
+
+    /*
+    * Cuando el IR solicita una variable sin nodo AST,
+    * buscamos exclusivamente en el ambito global.
+    *
+    * Para los nodos normales conservamos la resolucion
+    * original, que respeta el ambito del identificador.
+    */
+    if (simbolo == NULL && nodo == NULL) {
+        simbolo = ts_buscar_local(
+            ctx->tabla,
+            nombre,
+            ctx->tabla->ambito_global
+        );
+    }
+
+    /*
+    * Conservamos la busqueda de funciones globales
+    * utilizada por el CodeGen original.
+    */
     if (simbolo == NULL)
         simbolo = buscar_funcion_global(ctx->tabla, nombre);
+    
+    /* ------------------------------------------ NUEVO -----------------------------------------*/
+    /* ------------------------------------------ NUEVO -----------------------------------------*/
+    /* ------------------------------------------ NUEVO -----------------------------------------*/
+
 
     if (simbolo == NULL)
         return 0;
@@ -215,3 +242,161 @@ int codegen_resolver_desde_tabla(void *contexto,
 
     return 1;
 }
+
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+
+
+/*
+ * Busca un nodo del AST que tenga asociado un ambito.
+ *
+ * Algunas instrucciones IR conservan el nodo de una
+ * expresion completa. Ese nodo puede no tener un ambito
+ * registrado, aunque sus identificadores si lo tengan.
+ *
+ * Por eso recorremos sus hijos hasta encontrar un nodo
+ * que permita recuperar el ambito original.
+ */
+static const NodoAST *buscar_nodo_con_ambito(
+    const CodegenTablaContexto *ctx,
+    const NodoAST *nodo)
+{
+    const NodoAST *hijo;
+
+    if (ctx == NULL || nodo == NULL ||
+        ctx->obtener_ambito_nodo == NULL)
+        return NULL;
+
+    /*
+     * Si este nodo ya tiene un ambito registrado,
+     * podemos utilizarlo directamente.
+     */
+    if (ctx->obtener_ambito_nodo(nodo) != NULL)
+        return nodo;
+
+    /*
+     * Si no lo tiene, revisamos los hijos.
+     * No salimos del subarbol de la instruccion.
+     */
+    for (hijo = nodo->hijo;
+         hijo != NULL;
+         hijo = hijo->siguiente)
+    {
+        const NodoAST *encontrado =
+            buscar_nodo_con_ambito(ctx, hijo);
+
+        if (encontrado != NULL)
+            return encontrado;
+    }
+
+    return NULL;
+}
+
+
+/*
+ * Permite que el backend IR consulte la tabla de
+ * simbolos sin perder los ambitos del programa.
+ *
+ * Reutilizamos el resolvedor del CodeGen original
+ * para evitar duplicar la logica de busqueda.
+ */
+int codegen_resolver_ir_global(
+    void *contexto,
+    const NodoAST *nodo_origen,
+    const char *funcion,
+    const char *nombre,
+    CodegenSimbolo *salida)
+{
+    CodegenTablaContexto *ctx =
+        (CodegenTablaContexto *)contexto;
+
+    (void)funcion;
+
+    if (ctx == NULL ||
+        ctx->tabla == NULL ||
+        nombre == NULL ||
+        salida == NULL)
+    {
+        return 0;
+    }
+
+    /*
+     * Cuando tenemos el nodo original, usamos
+     * el ambito asociado a ese nodo.
+     *
+     * Cuando es NULL, el resolvedor original
+     * mantiene su busqueda global.
+     */
+    
+    /*
+     * Primero intentamos resolver el simbolo usando
+     * el nodo original de la instruccion IR.
+     */
+    if (!codegen_resolver_desde_tabla(
+            contexto,
+            nodo_origen,
+            nombre,
+            salida))
+    {
+        /*
+         * Si no se encontro, buscamos un nodo hijo
+         * que conserve informacion de su ambito.
+         *
+         * Esto permite resolver variables utilizadas
+         * dentro de expresiones como a + b.
+         */
+        const NodoAST *nodo_con_ambito =
+            buscar_nodo_con_ambito(ctx, nodo_origen);
+
+        if (nodo_con_ambito == NULL ||
+            !codegen_resolver_desde_tabla(
+                contexto,
+                nodo_con_ambito,
+                nombre,
+                salida))
+        {
+            return 0;
+        }
+    }
+
+
+    /*
+     * Aceptamos variables globales y locales,
+     * siempre que la tabla las haya reconocido.
+     */
+    if (salida->categoria == CODEGEN_CAT_VARIABLE &&
+        (salida->ubicacion == CODEGEN_UBICACION_GLOBAL ||
+         salida->ubicacion == CODEGEN_UBICACION_LOCAL))
+    {
+        return 1;
+    }
+
+    /*
+     * Los parametros tambien deben conservar
+     * su posicion relativa al marco de pila.
+     */
+    if (salida->categoria == CODEGEN_CAT_PARAMETRO &&
+        salida->ubicacion == CODEGEN_UBICACION_PARAMETRO)
+    {
+        return 1;
+    }
+
+    /*
+     * Las funciones siguen resolviendose
+     * para consultar su informacion de memoria.
+     */
+    if (salida->categoria == CODEGEN_CAT_FUNCION &&
+        salida->ubicacion == CODEGEN_UBICACION_FUNCION)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+
+
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
