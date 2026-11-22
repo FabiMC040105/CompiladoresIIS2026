@@ -130,7 +130,7 @@ char *ir_new_temp(IRProgram *p) /* Genera los nombres de las variables temporale
 
 char *ir_new_label(IRProgram *p) /* Practicamente igual que ir_new_temp, pero este es para etiquetas*/
 {
-    return p ? ir_new_name(&p->next_label, "@L") : NULL;
+    return p ? ir_new_name(&p->next_label, "L_ir_") : NULL;
 }
 
 /*-----------------------------------------------------------------------------------------------------------------------------------------------*/

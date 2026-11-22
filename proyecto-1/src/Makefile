@@ -44,11 +44,16 @@ HEADERS := ast.h tabla_simbolos.h memoria.h semantico.h \
            asm_emitter.h scheduler.h codegen.h codegen_tabla.h \
            resolucion_etiquetas.h etiquetas.h binario.h vliw_packer.h
 
-# Proyecto 2: IR, bloques basicos y optimizacion de codigo muerto.
-SRC += ir.c ir_ast.c basic_blocks.c liveness.c dead_code_elimination.c
 
-# Agregamos los encabezados de los modulos que utiliza esta fase.
-HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h
+# Proyecto 2: IR, bloques basicos y optimizacion de codigo muerto.
+# Incluimos tambien el adaptador que conecta el IR con el CodeGen original.
+SRC += ir.c ir_ast.c basic_blocks.c liveness.c dead_code_elimination.c \
+       codegen_ir.c
+
+# Registramos los encabezados para que Make detecte sus cambios.
+HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h \
+           codegen_ir.h
+
 
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
         simbolos arbol ast resolver wave check-bin \

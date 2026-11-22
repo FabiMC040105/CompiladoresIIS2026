@@ -30,6 +30,12 @@ typedef struct {
     char *result;
     char *extra;
     int source_line;
+    /*
+    Referencia al nodo original del AST.
+    No reservamos ni liberamos memoria para este puntero.
+    El AST debe seguir existiendo mientras utilicemos el IR.
+     */
+    const NodoAST *nodo_origen; // --------------------- NUEVO ------------------------
 } IRInstruction; /* Instruccion individual */
 
 typedef struct {

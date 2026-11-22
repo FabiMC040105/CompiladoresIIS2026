@@ -3047,3 +3047,504 @@ int codegen_generar_archivo(NodoAST *raiz,
 
     return cg.errores == 0 && !cg.emisor.error;
 }
+
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+
+/* -------------------------------------------------------------------------
+ * MOTOR COMPARTIDO PARA LA GENERACION DESDE IR
+ *
+ * Este bloque permite que el nuevo backend reutilice el emisor y el
+ * scheduler del CodeGen original. No cambia la generacion desde AST.
+ * ------------------------------------------------------------------------- */
+
+/*
+ * Guardamos el estado del generador original dentro del nuevo motor.
+ * De esta manera, el backend IR no necesita conocer los detalles
+ * internos de Codegen.
+ */
+struct CodegenMotor {
+    Codegen cg;
+};
+
+/*
+ * Prepara el motor y abre el archivo donde se escribira el ensamblador.
+ * Utilizamos las mismas validaciones de memoria que el CodeGen original.
+ */
+CodegenMotor *codegen_motor_crear(
+    const char *ruta_salida,
+    const CodegenConfig *config)
+{
+    CodegenMotor *motor;
+
+    if (ruta_salida == NULL || config == NULL)
+        return NULL;
+
+    if (config->fin_globales > MEMORIA_TOTAL_BYTES ||
+        (config->fin_globales % TAMANO_PALABRA) != 0) {
+        fprintf(stderr,
+                "Error CodeGen IR: final de globales invalido.\n");
+        return NULL;
+    }
+
+    /* Reservamos memoria e inicializamos el estado en cero. */
+    motor = calloc(1, sizeof(*motor));
+
+    if (motor == NULL) {
+        fprintf(stderr,
+                "Error CodeGen IR: no se pudo reservar memoria.\n");
+        return NULL;
+    }
+
+    motor->cg.config = *config;
+
+    /* El scheduler comienza sin dependencias pendientes. */
+    scheduler_inicializar(&motor->cg.scheduler);
+
+    /* Abrimos el archivo ASM utilizando el emisor existente. */
+    if (!asm_emitter_abrir(&motor->cg.emisor, ruta_salida)) {
+        perror("Error CodeGen IR: no se pudo abrir el ASM");
+        free(motor);
+        return NULL;
+    }
+
+    /* Agregamos comentarios para identificar el backend utilizado. */
+    if (!asm_emitir_comentario(
+            &motor->cg.emisor,
+            "Ensamblador generado desde IR optimizado") ||
+        !asm_emitir_comentario(
+            &motor->cg.emisor,
+            "Instrucciones planificadas con scheduler RAW")) {
+
+        asm_emitter_cerrar(&motor->cg.emisor);
+        free(motor);
+        return NULL;
+    }
+
+
+    /*
+     * Inicializamos los registros de pila para el backend IR.
+     *
+     * El generador original ya prepara estos registros cuando
+     * trabaja desde el AST, pero el nuevo motor IR necesita
+     * realizar la misma inicializacion por su cuenta.
+     *
+     * x14 (SP) comienza al final de la memoria disponible.
+     * x15 (FP) inicia apuntando a esa misma posicion.
+     */
+    if (!emitir_constante(
+            &motor->cg,
+            REG_SP,
+            (int32_t)PILA_INICIAL_DEFECTO) ||
+        !emitir_instruccion(
+            &motor->cg,
+            "ALU",
+            "ADD x%d, x%d, x0",
+            REG_FP,
+            REG_SP))
+    {
+        /*
+         * Si falla la inicializacion, cerramos el emisor
+         * y eliminamos el archivo para no dejar un ASM
+         * incompleto.
+         */
+        asm_emitter_cerrar(&motor->cg.emisor);
+        free(motor);
+        remove(ruta_salida);
+        return NULL;
+    }
+
+    return motor;
+}
+
+/*
+ * Emite una instruccion desde el backend IR.
+ *
+ * En lugar de escribir directamente en el archivo, utilizamos la
+ * funcion original emitir_instruccion(). Asi conservamos el manejo
+ * de dependencias, los NOPs y las barreras de control.
+ */
+int codegen_motor_emitir(
+    CodegenMotor *motor,
+    const char *slot,
+    const char *instruccion)
+{
+    if (motor == NULL || slot == NULL || instruccion == NULL)
+        return 0;
+
+    return emitir_instruccion(
+        &motor->cg,
+        slot,
+        "%s",
+        instruccion
+    );
+}
+
+/*
+ * Escribe una etiqueta en el ensamblador.
+ *
+ * Cuando llegamos a una etiqueta, puede existir un salto desde
+ * otra parte del programa. Por eso reiniciamos el scheduler:
+ * no podemos asumir que las instrucciones anteriores siempre
+ * se ejecutaron antes de entrar a este bloque.
+ *
+ * Esto evita utilizar dependencias de registros que pertenecen
+ * a otro camino de ejecucion.
+ */
+int codegen_motor_etiqueta(
+    CodegenMotor *motor,
+    const char *etiqueta)
+{
+    if (motor == NULL || etiqueta == NULL || etiqueta[0] == '\0')
+        return 0;
+
+    /*
+     * Comenzamos un bloque nuevo sin dependencias pendientes
+     * del bloque anterior.
+     */
+    scheduler_inicializar(&motor->cg.scheduler);
+
+    /*
+     * Utilizamos el mismo emisor del CodeGen original para
+     * conservar el formato de las etiquetas del ensamblador.
+     */
+    if (!asm_emitir_etiqueta(&motor->cg.emisor, etiqueta)) {
+        motor->cg.errores++;
+        return 0;
+    }
+
+    return 1;
+}
+
+/*
+ * Recupera el valor de una variable utilizando su informacion
+ * de la tabla de simbolos.
+ *
+ * La direccion se calcula con emitir_base_simbolo(), que ya
+ * distingue entre globales, locales y parametros.
+ */
+int codegen_motor_cargar_simbolo(
+    CodegenMotor *motor,
+    const CodegenSimbolo *simbolo,
+    int reg_destino)
+{
+    Codegen *cg;
+
+    if (motor == NULL || simbolo == NULL)
+        return 0;
+
+    cg = &motor->cg;
+
+    /*
+     * Solo permitimos registros temporales para no modificar
+     * los registros reservados del procesador.
+     */
+    if (reg_destino < REG_TEMP_PRIMERO ||
+        reg_destino > REG_TEMP_ULTIMO)
+        return 0;
+
+    /*
+     * Esta funcion carga valores escalares.
+     * Los accesos a listas y matrices se manejaran aparte.
+     */
+    if (simbolo->forma != CODEGEN_FORMA_ESCALAR ||
+        simbolo->categoria == CODEGEN_CAT_FUNCION ||
+        simbolo->parametro_por_referencia)
+        return 0;
+
+    /*
+     * Primero calculamos la direccion real del simbolo.
+     * Puede ser absoluta o relativa al frame pointer.
+     */
+    if (!emitir_base_simbolo(
+            cg, NULL, simbolo, REG_DIRECCION))
+        return 0;
+
+    /*
+     * Leemos el valor utilizando el emisor y el scheduler
+     * del CodeGen original.
+     */
+    return emitir_instruccion(
+        cg, "LSU",
+        "LOAD x%d, 0(x%d)",
+        reg_destino, REG_DIRECCION
+    );
+}
+
+/*
+ * Guarda un valor escalar en memoria.
+ *
+ * Recibimos el simbolo ya resuelto y reutilizamos el mismo
+ * calculo de direcciones del generador original.
+ */
+int codegen_motor_guardar_simbolo(
+    CodegenMotor *motor,
+    const CodegenSimbolo *simbolo,
+    int reg_valor)
+{
+    Codegen *cg;
+
+    if (motor == NULL || simbolo == NULL)
+        return 0;
+
+    cg = &motor->cg;
+
+    if (reg_valor < REG_TEMP_PRIMERO ||
+        reg_valor > REG_TEMP_ULTIMO)
+        return 0;
+
+    /*
+     * No podemos asignar un valor escalar a una funcion,
+     * una lista completa ni una matriz completa.
+     */
+    if (simbolo->forma != CODEGEN_FORMA_ESCALAR ||
+        simbolo->categoria == CODEGEN_CAT_FUNCION ||
+        simbolo->parametro_por_referencia)
+        return 0;
+
+    /*
+     * Calculamos la direccion del simbolo con las mismas
+     * reglas utilizadas por el CodeGen tradicional.
+     */
+    if (!emitir_base_simbolo(
+            cg, NULL, simbolo, REG_DIRECCION))
+        return 0;
+
+    /*
+     * Guardamos el registro en memoria.
+     */
+    return emitir_instruccion(
+        cg, "LSU",
+        "STORE x%d, 0(x%d)",
+        reg_valor, REG_DIRECCION
+    );
+}
+
+
+/*
+ * Prepara el marco de pila para una funcion generada
+ * desde el IR.
+ *
+ * Reutilizamos las mismas instrucciones que utiliza
+ * el CodeGen original, pero sin recorrer el AST.
+ */
+int codegen_motor_iniciar_funcion(
+    CodegenMotor *motor,
+    const char *nombre,
+    uint32_t tamano_marco,
+    int es_principal)
+{
+    Codegen *cg;
+    char etiqueta[160];
+
+    if (motor == NULL || nombre == NULL ||
+        nombre[0] == '\0')
+        return 0;
+
+    cg = &motor->cg;
+
+    /*
+     * Comprobamos que el marco pueda caber en memoria.
+     * Esta validacion es estatica; las llamadas anidadas
+     * necesitaran comprobaciones adicionales.
+     */
+    if (!pila_hay_espacio(
+            PILA_INICIAL_DEFECTO,
+            tamano_marco,
+            es_principal ? 0u : TAMANO_CABECERA,
+            cg->config.fin_globales))
+        return 0;
+
+    /*
+     * Principal es el punto de entrada del programa.
+     * Las demas funciones utilizan el prefijo func_.
+     */
+    if (es_principal) {
+        if (strcmp(nombre, "principal") != 0)
+            return 0;
+
+        snprintf(etiqueta, sizeof(etiqueta),
+                 "principal");
+    } else {
+        int n = snprintf(etiqueta, sizeof(etiqueta),
+                         "func_%s", nombre);
+
+        if (n < 0 || (size_t)n >= sizeof(etiqueta))
+            return 0;
+    }
+
+    if (!codegen_motor_etiqueta(motor, etiqueta))
+        return 0;
+
+    /*
+     * Principal no guarda un FP anterior.
+     * Simplemente establece su marco y reserva
+     * el espacio necesario para sus variables.
+     */
+    if (es_principal) {
+        return emitir_instruccion(
+                   cg, "ALU",
+                   "ADD x%d, x%d, x0",
+                   REG_FP, REG_SP) &&
+               emitir_ajuste_sp(
+                   cg, -(long)tamano_marco);
+    }
+
+    /*
+     * Una funcion normal comienza con un valor
+     * de retorno definido, inicialmente cero.
+     */
+    if (!emitir_constante(cg, REG_RETORNO_VALOR, 0))
+        return 0;
+
+    /*
+     * Guardamos el FP anterior, establecemos
+     * el nuevo FP y reservamos los locales.
+     */
+    return emitir_ajuste_sp(cg, -4) &&
+           emitir_instruccion(
+               cg, "LSU",
+               "STORE x%d, 0(x%d)",
+               REG_FP, REG_SP) &&
+           emitir_instruccion(
+               cg, "ALU",
+               "ADD x%d, x%d, x0",
+               REG_FP, REG_SP) &&
+           emitir_ajuste_sp(
+               cg, -(long)tamano_marco);
+}
+
+
+/*
+ * Finaliza una funcion generada desde el IR.
+ *
+ * Conservamos el mismo epilogo del CodeGen
+ * original para mantener la compatibilidad
+ * con las llamadas y los retornos.
+ */
+int codegen_motor_finalizar_funcion(
+    CodegenMotor *motor,
+    const char *nombre,
+    int es_principal)
+{
+    Codegen *cg;
+    char etiqueta[160];
+
+    if (motor == NULL || nombre == NULL ||
+        nombre[0] == '\0')
+        return 0;
+
+    cg = &motor->cg;
+
+    /*
+     * Principal no tiene una direccion de retorno
+     * almacenada por otra funcion.
+     */
+    if (es_principal) {
+        if (strcmp(nombre, "principal") != 0)
+            return 0;
+
+        return emitir_instruccion(
+                   cg, "ALU",
+                   "ADD x%d, x%d, x0",
+                   REG_SP, REG_FP) &&
+               emitir_instruccion(
+                   cg, "BRU",
+                   "JMP fin_programa");
+    }
+
+    /*
+     * La etiqueta de retorno es compartida por
+     * todos los caminos de salida de la funcion.
+     */
+    {
+        int n = snprintf(
+            etiqueta, sizeof(etiqueta),
+            "ret_%s", nombre);
+
+        if (n < 0 || (size_t)n >= sizeof(etiqueta))
+            return 0;
+    }
+
+    if (!codegen_motor_etiqueta(motor, etiqueta))
+        return 0;
+
+    /*
+     * Restauramos el SP al inicio del marco
+     * para descartar las variables locales.
+     */
+    if (!emitir_instruccion(
+            cg, "ALU",
+            "ADD x%d, x%d, x0",
+            REG_SP, REG_FP))
+        return 0;
+
+    /*
+     * Recuperamos el FP anterior desde 0(FP)
+     * y la direccion de retorno desde 4(FP).
+     */
+    if (!emitir_instruccion(
+            cg, "LSU",
+            "LOAD x%d, 0(x%d)",
+            REG_AUXILIAR, REG_FP) ||
+        !emitir_instruccion(
+            cg, "LSU",
+            "LOAD x%d, 4(x%d)",
+            REG_DIRECCION, REG_FP))
+        return 0;
+
+    /*
+     * Liberamos la cabecera de ocho bytes.
+     */
+    if (!emitir_instruccion(
+            cg, "ALU",
+            "ADDI x%d, x%d, 8",
+            REG_SP, REG_FP))
+        return 0;
+
+    /*
+     * Restauramos el FP anterior y volvemos
+     * a la instruccion siguiente a la llamada.
+     *
+     * El valor de retorno permanece en x2.
+     */
+    return emitir_instruccion(
+               cg, "ALU",
+               "ADD x%d, x%d, x0",
+               REG_FP, REG_AUXILIAR) &&
+           emitir_instruccion(
+               cg, "ALU",
+               "ADD x1, x%d, x0",
+               REG_DIRECCION);
+}
+
+/*
+ * Cierra el archivo y libera el motor.
+ *
+ * Primero comprobamos si hubo errores de generacion y luego
+ * verificamos si el archivo se pudo cerrar correctamente.
+ */
+int codegen_motor_cerrar(CodegenMotor *motor)
+{
+    int correcto;
+
+    if (motor == NULL)
+        return 0;
+
+    correcto = (motor->cg.errores == 0 &&
+                !motor->cg.emisor.error);
+
+    asm_emitter_cerrar(&motor->cg.emisor);
+
+    if (motor->cg.emisor.error)
+        correcto = 0;
+
+    free(motor);
+
+    return correcto;
+}
+
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
