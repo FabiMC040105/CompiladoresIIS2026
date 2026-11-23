@@ -44,13 +44,31 @@ HEADERS := ast.h tabla_simbolos.h memoria.h semantico.h \
            asm_emitter.h scheduler.h codegen.h codegen_tabla.h \
            resolucion_etiquetas.h etiquetas.h binario.h vliw_packer.h
 
-# Proyecto 2: IR, bloques basicos y optimizacion de codigo muerto.
-SRC += ir.c ir_ast.c basic_blocks.c liveness.c dead_code_elimination.c grafo_interferencia.c asignacion_registros.c spill_transform.c \
+# Proyecto 2: IR, bloques basicos y optimizaciones.
+# Conservamos el backend IR y conectamos los modulos nuevos.
+SRC += ir.c ir_ast.c basic_blocks.c liveness.c dead_code_elimination.c \
+       codegen_ir.c grafo_interferencia.c asignacion_registros.c spill_transform.c \
        dependencias.c dag.c renombramiento.c reordenamiento.c optimizaciones_ir.c
 
-# Agregamos los encabezados de los modulos que utiliza esta fase.
-HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h grafo_interferencia.h asignacion_registros.h spill_transform.h \
+# Registramos los encabezados para detectar cambios al recompilar.
+HEADERS += ir.h basic_blocks.h liveness.h dead_code_elimination.h \
+           codegen_ir.h grafo_interferencia.h asignacion_registros.h spill_transform.h \
            dependencias.h dag.h renombramiento.h reordenamiento.h optimizaciones_ir.h
+
+
+# Proyecto 2: optimizacion Loop Unrolling.
+# Se incorpora a las fases IR existentes.
+SRC += loop_unrolling.c
+HEADERS += loop_unrolling.h
+
+# Pruebas de la optimizacion Loop Unrolling.
+# Verifican que el IR transformado conserve los resultados.
+.PHONY: test-loop-unrolling
+test-loop-unrolling:
+	@mkdir -p evidencia-vliw/.make-tests
+	$(CC) $(CFLAGS) -I. -o evidencia-vliw/.make-tests/test_loop_unrolling \
+		pruebas/test_loop_unrolling.c loop_unrolling.c ir.c basic_blocks.c
+	./evidencia-vliw/.make-tests/test_loop_unrolling
 
 .PHONY: all help check check-arqui versions run bin asm ensamblar \
         simbolos arbol ast resolver wave check-bin \
@@ -301,6 +319,12 @@ help:
 	  'Ayuda del compilador: ./cdff --help' \
 	  '=========================================================='
 
+
+# Pruebas autocontenidas del backend IR (sin Flex/Bison/RTL).
+.PHONY: test-codegen-ir-backend
+test-codegen-ir-backend:
+	./probar_codegen_ir_backend.sh
+
 # ---------------------------------------------------------------
 #  grafo de interferencia y coloreo para spilling
 # ---------------------------------------------------------------
@@ -353,7 +377,7 @@ test-spill: $(TEST_DIR)/prueba_spill_transform
 IR_OPT_TEST_SOURCES := ir.c ir_ast.c ast.c basic_blocks.c liveness.c \
     dead_code_elimination.c dependencias.c dag.c renombramiento.c \
     reordenamiento.c grafo_interferencia.c asignacion_registros.c \
-    spill_transform.c optimizaciones_ir.c
+    spill_transform.c optimizaciones_ir.c loop_unrolling.c
 
 $(TEST_DIR)/prueba_integracion_opt_ir: pruebas/prueba_integracion_opt_ir.c $(IR_OPT_TEST_SOURCES) $(HEADERS) | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ pruebas/prueba_integracion_opt_ir.c \

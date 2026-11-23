@@ -443,9 +443,76 @@ int eliminar_codigo_muerto(
                 );
             }
 
-            // Eliminamos solamente cuando el resultado no esta vivo
-            // y tampoco encontramos un uso que debamos proteger
-            if (!esta_viva && !usada_en_otra_funcion) {
+            /*
+             * Los temporales internos comienzan con %.
+             * Podemos eliminar sus resultados cuando liveness
+             * demuestra que ya no se necesitan.
+             *
+             * Las variables declaradas por el programa pueden
+             * conservar valores observables en memoria. Por ahora
+             * protegemos esas asignaciones para evitar eliminar
+             * resultados necesarios al finalizar la ejecucion.
+             */
+            int es_temporal_interno =
+                instruccion->result[0] == '%';
+
+            /*
+             * Conservamos las asignaciones finales de principal.
+             * El backend puede dejar sus valores en memoria y
+             * necesitamos preservar ese resultado observable.
+             */
+            int en_principal = 0;
+            for (size_t j = 0; j <= i; j++) {
+                const IRInstruction *actual =
+                    &programa->instructions[j];
+
+                if (actual->op == IR_FUNC_BEGIN) {
+                    en_principal = actual->result != NULL &&
+                        strcmp(actual->result, "principal") == 0;
+                } else if (actual->op == IR_FUNC_END) {
+                    en_principal = 0;
+                }
+            }
+
+            /*
+             * Mantenemos la protección de principal y permitimos
+             * eliminar asignaciones muertas en otros contextos.
+             */
+            /*
+             * Cuando principal no tiene un retorno explicito,
+             * conservamos sus variables porque el backend puede
+             * dejar sus valores disponibles en memoria.
+             *
+             * Si existe un retorno, permitimos que liveness
+             * identifique las asignaciones innecesarias.
+             */
+            int principal_tiene_retorno = 0;
+            int dentro_de_principal = 0;
+
+            for (size_t j = 0; j < programa->count; j++) {
+                const IRInstruction *actual =
+                    &programa->instructions[j];
+
+                if (actual->op == IR_FUNC_BEGIN) {
+                    dentro_de_principal =
+                        actual->result != NULL &&
+                        strcmp(actual->result, "principal") == 0;
+                } else if (actual->op == IR_FUNC_END) {
+                    dentro_de_principal = 0;
+                } else if (dentro_de_principal &&
+                           actual->op == IR_RETURN) {
+                    principal_tiene_retorno = 1;
+                }
+            }
+
+            int proteger_resultado =
+                en_principal &&
+                !principal_tiene_retorno &&
+                !es_temporal_interno;
+
+            if (!proteger_resultado &&
+                !esta_viva &&
+                !usada_en_otra_funcion) {
                 eliminar[i] = 1;
             }
         }

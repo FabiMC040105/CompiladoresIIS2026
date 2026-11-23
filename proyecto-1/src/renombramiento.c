@@ -48,6 +48,11 @@ static int clonar(const IRProgram *p, IRProgram *copia)
         if (!ir_emit_ex(copia,v->op,v->arg1,v->arg2,v->result,v->extra,v->source_line)) {
             ir_free(copia); return 0;
         }
+
+        /* La copia mantiene el contexto del AST original.
+           No somos propietarios de ese nodo. */
+        copia->instructions[copia->count - 1].nodo_origen =
+            v->nodo_origen;
     }
     return 1;
 }

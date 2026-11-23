@@ -17,4 +17,30 @@ int codegen_resolver_desde_tabla(void *contexto,
                                  const char *nombre,
                                  CodegenSimbolo *salida);
 
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+
+
+
+/*
+ * Adaptador de simbolos para el backend IR.
+ *
+ * Si recibimos un nodo del AST, buscamos usando
+ * su ambito. Si no hay nodo, mantenemos una
+ * busqueda restringida al ambito global.
+ */
+int codegen_resolver_ir_global(
+    void *contexto,
+    const NodoAST *nodo_origen,
+    const char *funcion,
+    const char *nombre,
+    CodegenSimbolo *salida
+);
+
+
+
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
+/* ------------------------------------------ NUEVO -----------------------------------------*/
 #endif

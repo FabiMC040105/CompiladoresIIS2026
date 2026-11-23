@@ -6,15 +6,17 @@
 #include "renombramiento.h"
 #include "reordenamiento.h"
 #include "spill_transform.h"
+#include "loop_unrolling.h"
 
-/* Opciones independientes; OPT_IR_TODAS ejecuta las cuatro fases. */
+/* Opciones independientes; OPT_IR_TODAS ejecuta las cinco fases. */
 enum {
     OPT_IR_DCE         = 1u << 0,
     OPT_IR_RENOMBRAR   = 1u << 1,
     OPT_IR_REORDENAR   = 1u << 2,
     OPT_IR_SPILL       = 1u << 3,
+    OPT_IR_UNROLL      = 1u << 4,
     OPT_IR_TODAS       = OPT_IR_DCE | OPT_IR_RENOMBRAR |
-                         OPT_IR_REORDENAR | OPT_IR_SPILL
+                         OPT_IR_REORDENAR | OPT_IR_SPILL | OPT_IR_UNROLL
 };
 
 typedef struct {
@@ -23,6 +25,7 @@ typedef struct {
     RenEstadisticas renombramiento;
     ReoEstadisticas reordenamiento;
     ResultadoSpill spilling;
+    LoopUnrollStats unrolling;
     size_t instrucciones_antes;
     size_t instrucciones_despues;
 } OptIREstadisticas;
@@ -40,6 +43,13 @@ typedef struct {
  */
 int opt_ir_aplicar(IRProgram *programa, unsigned fases, int colores,
                   int registro_base, OptIREstadisticas *estadisticas);
+
+/* Nueva interfaz que permite indicar el factor de desenrollamiento. */
+int opt_ir_aplicar_config(IRProgram *programa, unsigned fases,
+                          int colores, int registro_base,
+                          unsigned factor_unroll,
+                          OptIREstadisticas *estadisticas);
+
 void opt_ir_imprimir(const OptIREstadisticas *estadisticas, FILE *salida);
 
 /* Opcional para codegen_ir: asignacion fisica final de los temporales.

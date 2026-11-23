@@ -70,13 +70,56 @@ static int report(Generator *g, const NodoAST *node, const char *fmt, ...)
 /* Envia una instruccion al programa IR usando
    ir_emit_ex. Obtiene la linea desde el AST y
    reporta un error si falla el almacenamiento. */
+
+/* ------------------------------------- NUEVO -------------------------------------*/
+/* ------------------------------------- NUEVO -------------------------------------*/
+/* ------------------------------------- NUEVO -------------------------------------*/
+
+/*
+ * Agrega una instruccion al IR y conserva el nodo del AST
+ * que produjo esa instruccion.
+ *
+ * De esta manera, cuando el CodeGen procese el IR, podra
+ * consultar informacion del programa original sin tener
+ * que reconstruir todo el AST.
+ */
 static int emit_ex(Generator *g, const NodoAST *n, IROp op,
-                   const char *a, const char *b, const char *r, const char *extra)
+                   const char *a, const char *b,
+                   const char *r, const char *extra)
 {
-    if (!ir_emit_ex(g->program, op, a, b, r, extra, n ? n->linea : 0))
-        return report(g, n, "Memoria insuficiente al generar IR");
+    IRInstruction *instruccion;
+
+    /*
+     * Primero guardamos la instruccion utilizando la
+     * funcion que ya teniamos implementada.
+     */
+    if (!ir_emit_ex(g->program, op, a, b, r, extra,
+                    n ? n->linea : 0)) {
+        return report(g, n,
+                      "Memoria insuficiente al generar IR");
+    }
+
+    /*
+     * Como ir_emit_ex agrego la instruccion al final,
+     * recuperamos esa posicion para asociarle su origen.
+     */
+    instruccion =
+        &g->program->instructions[g->program->count - 1];
+
+    /*
+     * Conservamos la referencia al AST.
+     * No hacemos una copia del nodo porque el arbol
+     * original sigue siendo propiedad del parser.
+     */
+    instruccion->nodo_origen = n;
+
     return 1;
 }
+/* ------------------------------------- NUEVO -------------------------------------*/
+/* ------------------------------------- NUEVO -------------------------------------*/
+/* ------------------------------------- NUEVO -------------------------------------*/
+
+
 /* Lo mismo pero sin necesitar un argumento extra*/
 static int emit(Generator *g, const NodoAST *n, IROp op,
                 const char *a, const char *b, const char *r)
@@ -391,7 +434,11 @@ static int assignment(Generator *g, const NodoAST *n)
     value = expression(g, child(n, 1));
     if (!value) return 0;
     if (dst->tipo == AST_VARIABLE && dst->valor) {
-        ok = emit(g, n, IR_COPY, value, NULL, dst->valor);
+        /*
+        * Conservamos el nodo de la variable destino
+        * para consultar su ambito durante el CodeGen.
+        */
+        ok = emit(g, dst, IR_COPY, value, NULL, dst->valor);
     } else if (dst->tipo == AST_ACCESO_LISTA || dst->tipo == AST_ACCESO_MATRIZ) {
         const NodoAST *base = child(dst, 0);
         if (!base || !base->valor) { report(g, n, "Destino arreglo sin nombre"); goto done; }
@@ -422,7 +469,11 @@ static int declaration(Generator *g, const NodoAST *n)
     if (!ok || !child(n, 1)) return ok;
     value = expression(g, child(n, 1));
     if (!value) return 0;
-    ok = emit(g, n, IR_COPY, value, NULL, id->valor);
+    /*
+    * Asociamos la asignacion con el identificador
+    * para que el CodeGen IR pueda recuperar su ambito.
+    */
+    ok = emit(g, id, IR_COPY, value, NULL, id->valor);
     free(value);
     return ok;
 }
