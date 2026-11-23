@@ -1767,7 +1767,8 @@ static void mostrar_uso(FILE *f)
         "  --emit-ir       Imprime la representación intermedia.\n"
         "  --ir-cfg        Imprime el grafo de flujo de control.\n"
         "  --dce           Elimina código muerto del IR.\n"
-        "  --codegen-ir    Genera ensamblador utilizando el backend IR.\n"
+        "  --codegen-ir    Genera ensamblador utilizando el backend IR con Chaitin.\n"
+        "  --codegen-ir-mem Genera una baseline diagnostica con temporales en memoria.\n"
         "  --spill         Activa spilling AST y la fase de spilling IR.\n"
         "  --spill-ir      Activa solamente spilling IR.\n"
         "  --spill-mapa    Muestra el coloreo final %%tN -> x4-x12.\n"
@@ -1839,6 +1840,7 @@ int main(int argc, char *argv[])
     int opcion_dce = 0;
     // Permite probar el generador desde IR sin reemplazar el backend original.
     int opcion_codegen_ir = 0;
+    int opcion_codegen_ir_mem = 0;
     // Permite activar el spilling del backend AST.
     int opcion_spill = 0;
 
@@ -1884,6 +1886,13 @@ int main(int argc, char *argv[])
         // Activamos el backend experimental que traduce IR a ensamblador
         else if (strcmp(argv[i], "--codegen-ir") == 0)
             opcion_codegen_ir = 1;
+        /* Baseline de diagnostico para comparar el backend IR anterior.
+         * Mantiene los temporales en memoria y no consume el mapa Chaitin. */
+        else if (strcmp(argv[i], "--codegen-ir-mem") == 0)
+        {
+            opcion_codegen_ir = 1;
+            opcion_codegen_ir_mem = 1;
+        }
         // Activa el spilling del backend AST y del IR.
         else if (strcmp(argv[i], "--spill") == 0)
             opcion_spill = 1;
@@ -2365,39 +2374,48 @@ int main(int argc, char *argv[])
          * esta habilitado, el IR ya contiene los STORE/LOAD necesarios y el
          * grafo final debe ser completamente coloreable.
          */
-        ar_init(&mapa_codegen_ir);
-        mapa_codegen_inicializado = 1;
-
-        if (!opt_ir_asignacion_para_codegen_ir(
-                &programa_ir_codegen,
-                9,
-                4,
-                &mapa_codegen_ir))
+        if (!opcion_codegen_ir_mem)
         {
-            if (!(fases_ir_activas & OPT_IR_SPILL))
-            {
-                fprintf(stderr,
-                        "Error: la IR requiere mas de 9 registros temporales. "
-                        "Use --spill-ir o --opt-ir.\n");
-            }
-            else
-            {
-                fprintf(stderr,
-                        "Error: el grafo final sigue sin poder colorearse "
-                        "despues de spilling.\n");
-            }
+            ar_init(&mapa_codegen_ir);
+            mapa_codegen_inicializado = 1;
 
-            ar_free(&mapa_codegen_ir);
-            ir_free(&programa_ir_codegen);
-            goto error_compilacion;
+            if (!opt_ir_asignacion_para_codegen_ir(
+                    &programa_ir_codegen,
+                    9,
+                    4,
+                    &mapa_codegen_ir))
+            {
+                if (!(fases_ir_activas & OPT_IR_SPILL))
+                {
+                    fprintf(stderr,
+                            "Error: la IR requiere mas de 9 registros temporales. "
+                            "Use --spill-ir o --opt-ir.\n");
+                }
+                else
+                {
+                    fprintf(stderr,
+                            "Error: el grafo final sigue sin poder colorearse "
+                            "despues de spilling.\n");
+                }
+
+                ar_free(&mapa_codegen_ir);
+                ir_free(&programa_ir_codegen);
+                goto error_compilacion;
+            }
         }
 
         /*
         * Reutilizamos la configuracion original:
         * memoria global y tabla de simbolos.
+        * La baseline --codegen-ir-mem deja el mapa en NULL para medir
+        * el costo del esquema historico de temporales en memoria.
         */
         config_ir.original = config_codegen;
-        config_ir.asignacion_registros = &mapa_codegen_ir;
+        config_ir.asignacion_registros =
+            opcion_codegen_ir_mem ? NULL : &mapa_codegen_ir;
+
+        if (opcion_verbose && opcion_codegen_ir_mem)
+            printf("[CODEGEN IR] baseline: temporales en memoria, sin Chaitin\n");
 
         /*
         * El resolvedor IR actual admite solamente

@@ -1,3 +1,5 @@
+entero resultado = 0 :)
+
 defina entero suma10(
     entero a1, entero a2, entero a3, entero a4, entero a5,
     entero a6, entero a7, entero a8, entero a9, entero a10
@@ -7,7 +9,7 @@ defina entero suma10(
 }:)
 
 defina vacio principal() {
-    entero resultado = suma10(
+    resultado = suma10(
         1 + 0,
         2 + 0,
         3 + 0,

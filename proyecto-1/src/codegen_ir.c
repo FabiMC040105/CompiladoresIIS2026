@@ -1298,6 +1298,60 @@ static int apilar_operando_ir(EstadoIR *e, const char *nombre)
 }
 
 /*
+ * IR_PARAM consume semanticamente el argumento en el punto donde aparece.
+ * Con Chaitin, dos temporales de parametros distintos pueden reutilizar el
+ * mismo registro despues de su IR_PARAM. Como llamar_ir materializa la pila
+ * mas tarde, congelamos aqui los temporales coloreados en su slot de respaldo
+ * y los recuperamos al construir la llamada.
+ */
+static int congelar_argumento_ir(EstadoIR *e, const char *nombre)
+{
+    long dir;
+    int reg;
+
+    if (!e || !nombre)
+        return 0;
+
+    if (e->config == NULL ||
+        e->config->asignacion_registros == NULL ||
+        !es_temporal(nombre))
+        return 1;
+
+    reg = registro_temporal_mapeado(e, nombre);
+
+    /* Un temporal no coloreado ya utiliza su respaldo en memoria. */
+    if (reg < 0)
+        return 1;
+
+    if (!direccion_temporal(e, nombre, &dir))
+        return 0;
+
+    return constante(e, 13, (int32_t)dir) &&
+           emitir(e, "LSU", "STORE x%d, 0(x13)", reg);
+}
+
+static int apilar_argumento_congelado_ir(EstadoIR *e, const char *nombre)
+{
+    long dir;
+
+    if (e == NULL || nombre == NULL)
+        return 0;
+
+    if (e->config != NULL &&
+        e->config->asignacion_registros != NULL &&
+        es_temporal(nombre)) {
+        if (!direccion_temporal(e, nombre, &dir))
+            return 0;
+
+        return constante(e, 13, (int32_t)dir) &&
+               emitir(e, "LSU", "LOAD x3, 0(x13)") &&
+               apilar_ir(e, 3);
+    }
+
+    return apilar_operando_ir(e, nombre);
+}
+
+/*
  * Las rutinas software MUL/DIV/MOD/POW usan libremente x4-x12. Antes de
  * llamarlas preservamos el banco asignado por Chaitin, colocamos los dos
  * operandos en x4/x5 y conservamos el resultado en x2 mientras restauramos.
@@ -1361,7 +1415,7 @@ static int llamar_ir(EstadoIR *e, const IRInstruction *i)
      * por Chaitin. Para constantes/variables usamos x3, que es auxiliar.
      */
     for (size_t a = n; a > 0; --a)
-        if (!apilar_operando_ir(e, e->argumentos[a - 1])) return 0;
+        if (!apilar_argumento_congelado_ir(e, e->argumentos[a - 1])) return 0;
 
     if (!emitir(e, "ALU", "ADDI x14, x14, -4") ||
         !emitir(e, "ALU", "ADDI x3, x1, %s", retorno) ||
@@ -2056,6 +2110,8 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
     case IR_PARAM:
         if (!i->arg1 || e->cantidad_argumentos >= 64)
             return fallo(e, i, "argumento IR invalido o limite excedido");
+        if (!congelar_argumento_ir(e, i->arg1))
+            return fallo(e, i, "no se pudo congelar argumento IR");
         e->argumentos[e->cantidad_argumentos++] = i->arg1;
         return 1;
 

@@ -1,3 +1,5 @@
+entero resultado = 0 :)
+
 defina entero acumular(entero n) {
     entero i = 0 :)
     entero suma = 0 :)
@@ -12,5 +14,5 @@ defina entero acumular(entero n) {
 
 defina vacio principal() {
     entero limite = 5 :)
-    entero resultado = acumular(limite) :)
+    resultado = acumular(limite) :)
 } :)

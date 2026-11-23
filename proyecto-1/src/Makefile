@@ -463,3 +463,39 @@ test-spill-completo: \
 
 test-importaciones: all
 	./pruebas/probar_importaciones.sh
+
+# ---------------------------------------------------------------
+# Suite final de 15 pruebas y métricas gráficas del Proyecto 2.
+# ---------------------------------------------------------------
+.PHONY: test-suite-optimizaciones metricas-optimizaciones
+
+test-suite-optimizaciones: all
+	$(PYTHON) pruebas/medir_suite_optimizaciones.py
+
+metricas-optimizaciones: test-suite-optimizaciones
+	@echo "PASS: métricas y gráficas generadas en ../docs/metricas-optimizaciones"
+
+# ---------------------------------------------------------------
+# Bateria maestra de entrega - Proyecto II
+# ---------------------------------------------------------------
+.PHONY: test-ide test-entrega-local test-entrega
+
+test-ide:
+	cd ../.. && python3 -m unittest discover -s ide/tests -p 'test_*.py' -v
+	@if command -v node >/dev/null 2>&1; then \
+		cd ../.. && node ide/tests/test_frontend.js; \
+	else \
+		echo 'AVISO: Node.js no instalado; se omite test_frontend.js (pruebas Python completadas).'; \
+	fi
+
+test-entrega-local: test test-codegen-ir-backend test-importaciones test-spill-completo test-suite-optimizaciones test-ide
+	@echo ''
+	@echo '=================================================='
+	@echo 'PASS: BATERIA LOCAL DE ENTREGA COMPLETADA'
+	@echo '=================================================='
+
+test-entrega: test-entrega-local test-rtl-actual
+	@echo ''
+	@echo '=================================================='
+	@echo 'PASS: PROYECTO II - VALIDACION FINAL COMPLETA'
+	@echo '=================================================='

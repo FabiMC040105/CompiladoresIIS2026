@@ -20,7 +20,7 @@ for entrada in 'factorial 65528 120' 'para 65532 8' \
                'factorial_recursivo 65528 120' \
                'lista_parametro 65528 17' \
                'ast_factorial 65528 120' 'ast_para 65532 8' \
-               'spill_chaitin 65528 55'; do
+               'spill_chaitin 65528 55' 'spill_call 65528 55'; do
     read -r nombre dir esperado <<<"$entrada"
     asm="$OUT/${nombre}_backend_ir.asm"
     "$OUT/prueba_codegen_ir_runtime" "$nombre" "$asm"
@@ -29,4 +29,4 @@ for entrada in 'factorial 65528 120' 'para 65532 8' \
         > "$OUT/${nombre}_resolucion.log" 2>&1
     echo "PASS: etiquetas ASM $nombre"
 done
-printf '\nPASS: once pruebas de backend IR, Chaitin/spilling y resolucion de etiquetas\n'
+printf '\nPASS: doce pruebas de backend IR, Chaitin/spilling, llamadas y resolucion de etiquetas\n'

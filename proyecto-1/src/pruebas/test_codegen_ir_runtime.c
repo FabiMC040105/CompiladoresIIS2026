@@ -30,6 +30,10 @@ static int simbolo(void *ctx, const NodoAST *nodo, const char *funcion,
         s->dimensiones[0]=4; s->direccion = 8;
         s->parametro_por_referencia=1; return 1;
     }
+    if (!strcmp(nombre,"suma10")) {
+        s->categoria = CODEGEN_CAT_FUNCION; s->ubicacion = CODEGEN_UBICACION_FUNCION;
+        s->tamano_parametros = 40; s->tamano_marco = 0; return 1;
+    }
     if (!strcmp(nombre,"factorial")) {
         s->categoria = CODEGEN_CAT_FUNCION; s->ubicacion = CODEGEN_UBICACION_FUNCION;
         s->tamano_parametros = 4; s->tamano_marco = 8; return 1;
@@ -39,6 +43,16 @@ static int simbolo(void *ctx, const NodoAST *nodo, const char *funcion,
         s->tamano_marco = 8; return 1;
     }
     if (!funcion) return 0;
+    if (!strcmp(funcion,"suma10")) {
+        int indice = 0;
+        if (sscanf(nombre, "a%d", &indice) == 1 && indice >= 1 && indice <= 10) {
+            s->categoria = CODEGEN_CAT_PARAMETRO;
+            s->ubicacion = CODEGEN_UBICACION_PARAMETRO;
+            s->direccion = 8 + (indice - 1) * 4;
+            return 1;
+        }
+        return 0;
+    }
     if (!strcmp(funcion,"factorial")) {
         if (!strcmp(nombre,"n")) {
             s->categoria = CODEGEN_CAT_PARAMETRO;
@@ -238,6 +252,54 @@ int main(int argc, char **argv) {
         EM(IR_ADD,"%t7","%t3","%t8"); EM(IR_ADD,"%t8","%t4","%t9");
         EM(IR_ADD,"%t9","%t5","%t10"); EM(IR_COPY,"%t10",NULL,"resultado");
         EM(IR_FUNC_END,NULL,NULL,"principal");
+    } else if (!strcmp(argv[1],"spill_call")) {
+        EM(IR_FUNC_BEGIN,NULL,NULL,"suma10");
+        EM(IR_PARAM_DECL,"entero",NULL,"a1");
+        EM(IR_PARAM_DECL,"entero",NULL,"a2");
+        EM(IR_PARAM_DECL,"entero",NULL,"a3");
+        EM(IR_PARAM_DECL,"entero",NULL,"a4");
+        EM(IR_PARAM_DECL,"entero",NULL,"a5");
+        EM(IR_PARAM_DECL,"entero",NULL,"a6");
+        EM(IR_PARAM_DECL,"entero",NULL,"a7");
+        EM(IR_PARAM_DECL,"entero",NULL,"a8");
+        EM(IR_PARAM_DECL,"entero",NULL,"a9");
+        EM(IR_PARAM_DECL,"entero",NULL,"a10");
+        EM(IR_ADD,"a1","a2","%t0");
+        EM(IR_ADD,"%t0","a3","%t1");
+        EM(IR_ADD,"%t1","a4","%t2");
+        EM(IR_ADD,"%t2","a5","%t3");
+        EM(IR_ADD,"%t3","a6","%t4");
+        EM(IR_ADD,"%t4","a7","%t5");
+        EM(IR_ADD,"%t5","a8","%t6");
+        EM(IR_ADD,"%t6","a9","%t7");
+        EM(IR_ADD,"%t7","a10","%t8");
+        EM(IR_RETURN,"%t8",NULL,NULL);
+        EM(IR_FUNC_END,NULL,NULL,"suma10");
+        EM(IR_FUNC_BEGIN,NULL,NULL,"principal");
+        EM(IR_DECL,"entero",NULL,"resultado");
+        EM(IR_ADD,"1","0","%t9");
+        EM(IR_ADD,"2","0","%t10");
+        EM(IR_ADD,"3","0","%t11");
+        EM(IR_ADD,"4","0","%t12");
+        EM(IR_ADD,"5","0","%t13");
+        EM(IR_ADD,"6","0","%t14");
+        EM(IR_ADD,"7","0","%t15");
+        EM(IR_ADD,"8","0","%t16");
+        EM(IR_ADD,"9","0","%t17");
+        EM(IR_ADD,"10","0","%t18");
+        EM(IR_PARAM,"%t9",NULL,NULL);
+        EM(IR_PARAM,"%t10",NULL,NULL);
+        EM(IR_PARAM,"%t11",NULL,NULL);
+        EM(IR_PARAM,"%t12",NULL,NULL);
+        EM(IR_PARAM,"%t13",NULL,NULL);
+        EM(IR_PARAM,"%t14",NULL,NULL);
+        EM(IR_PARAM,"%t15",NULL,NULL);
+        EM(IR_PARAM,"%t16",NULL,NULL);
+        EM(IR_PARAM,"%t17",NULL,NULL);
+        EM(IR_PARAM,"%t18",NULL,NULL);
+        EM(IR_CALL,"suma10","10","%t19");
+        EM(IR_COPY,"%t19",NULL,"resultado");
+        EM(IR_FUNC_END,NULL,NULL,"principal");
     } else if (!strcmp(argv[1],"spill_chaitin")) {
         EM(IR_FUNC_BEGIN,NULL,NULL,"principal");
         EM(IR_COPY,"1",NULL,"%t0");
@@ -266,7 +328,8 @@ int main(int argc, char **argv) {
         !strcmp(caso_actual,"lista_parametro") ? 16 : 0;
     cfg.resolver_ir = simbolo;
 
-    if (!strcmp(argv[1], "spill_chaitin")) {
+    if (!strcmp(argv[1], "spill_chaitin") ||
+        !strcmp(argv[1], "spill_call")) {
         ResultadoSpill spill = {0};
         if (!spill_resolver_programa(&p, 9, 4, &spill) ||
             spill.stores == 0 || spill.loads == 0) {
