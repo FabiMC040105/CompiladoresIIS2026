@@ -1,0 +1,5 @@
+[OPT IR] instrucciones: 18 -> 30
+[UNROLL IR] encontrados=1 desenrollados=1 omitidos=0
+Archivo binario generado: /mnt/c/Users/fmoreno/Desktop/Compi-Entrega-Final/proyecto-1/src/evidencia-vliw/rtl-loop-unrolling/unroll_01_optimizado.bin
+Bundles generados: 184
+Bytes de instrucciones: 2944

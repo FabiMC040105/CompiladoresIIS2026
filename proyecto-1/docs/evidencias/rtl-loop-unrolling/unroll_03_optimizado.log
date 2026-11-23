@@ -1,0 +1,17 @@
+WARNING: /mnt/c/Users/fmoreno/Desktop/Arquitectura1-IIS2026-dev/src/memory/instruction_memory.sv:35: $readmemh(/mnt/c/Users/fmoreno/Desktop/Compi-Entrega-Final/proyecto-1/src/evidencia-vliw/rtl-loop-unrolling/unroll_03_optimizado.bin): Not enough words in the file for the requested range [0:4095].
+
+=== INTEGRACION COMPILADOR -> RTL ACTUAL ===
+PC observado: 0x00000b60
+Resultado L2: encontrado=1 addr=0 valor=499500 esperado=499500
+Ciclos HW: 32969
+Bundles retirados HW: 31345
+Instrucciones retiradas HW: 15290
+Stalls cache HW: 77
+Stalls lookup L2 HW: 16
+Stalls memoria HW: 54
+Stalls buffers HW: 0
+L2 read H/M: 1/0
+L2 write H/M: 2001/2
+RAM reads/writes: 2/0
+PASS RTL: binario de CE1108 ejecuto correctamente sobre CPU+L1+L2+RAM de CE4301
+/mnt/c/Users/fmoreno/Desktop/Compi-Entrega-Final/proyecto-1/src/evidencia-vliw/rtl-loop-unrolling/tb_unroll.sv:153: $finish called at 329716000 (1ps)
