@@ -298,7 +298,7 @@ static int can_group_without_checks(const IRProgram *p,
     errno = 0;
     long bound = strtol(cmp->arg2, &end, 10);
     if (errno || end == cmp->arg2 || *end ||
-        bound < (long)factor || bound > INT32_MAX ||
+        bound < (long)factor * 3L || bound > INT32_MAX ||
         bound % (long)factor) return 0;
 
     const char *counter = cmp->arg1;
@@ -433,13 +433,13 @@ int loop_unroll(const IRProgram *input, IRProgram *output,
     for (i = 0; i < input->count;) {
         LoopMatch match;
         if (input->instructions[i].op == IR_LABEL &&
-            find_simple_loop(input, cfg, i, max_body, max_extra, factor, &match)) {
+            find_simple_loop(input, cfg, i, max_body, max_extra, factor, &match) &&
+            can_group_without_checks(input, &match, factor)) {
             unsigned rep;
-            int grouped = can_group_without_checks(input, &match, factor);
             if (!raw_copy(&generated, &input->instructions[i])) goto fail;
             for (rep = 0; rep < factor; ++rep)
                 if (!emit_iteration(input, &generated, &match, rep == 0,
-                                    grouped && rep > 0)) goto fail;
+                                    rep > 0)) goto fail;
             if (!raw_copy(&generated, &input->instructions[match.latch])) goto fail;
             ++record.loops_unrolled;
             i = match.latch + 1;
