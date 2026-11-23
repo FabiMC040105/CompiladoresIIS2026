@@ -449,3 +449,11 @@ test-spill-completo: \
 	@echo "PASS: integracion con optimizaciones IR"
 	@echo "PASS: backend IR"
 	@echo "PASS: 3 programas obligatorios"
+
+# ---------------------------------------------------------------
+# Proyecto 2: enlazado entre archivos con #traigase
+# ---------------------------------------------------------------
+.PHONY: test-importaciones
+
+test-importaciones: all
+	./pruebas/probar_importaciones.sh

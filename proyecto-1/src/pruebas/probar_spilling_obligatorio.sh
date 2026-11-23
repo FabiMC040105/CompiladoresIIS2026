@@ -49,13 +49,26 @@ for fuente in "${pruebas[@]}"; do
         exit 1
     fi
 
-    if ! grep -q 'STORE x4, 0(x11)' "$asm"; then
-        echo "FAIL: no se encontro STORE de spilling en ASM"
+    # El backend con Chaitin ya no fija los temporales a x4 ni usa x11
+    # como direccion de spill. Verificamos el efecto semantico en la IR y
+    # la materializacion real mediante LSU usando el registro de direccion x13.
+    if ! grep -Eq 'cdff_spill_area\[[0-9]+\] = %t[0-9]+' "$log"; then
+        echo "FAIL: no se encontro STORE de spilling en IR"
         exit 1
     fi
 
-    if ! grep -q 'LOAD x4, 0(x11)' "$asm"; then
-        echo "FAIL: no se encontro LOAD de spilling en ASM"
+    if ! grep -Eq '%t[0-9]+ = cdff_spill_area\[[0-9]+\]' "$log"; then
+        echo "FAIL: no se encontro LOAD de spilling en IR"
+        exit 1
+    fi
+
+    if ! grep -Eq 'STORE x[0-9]+, 0\(x13\)' "$asm"; then
+        echo "FAIL: no se materializo STORE de memoria en ASM"
+        exit 1
+    fi
+
+    if ! grep -Eq 'LOAD x[0-9]+, 0\(x13\)' "$asm"; then
+        echo "FAIL: no se materializo LOAD de memoria en ASM"
         exit 1
     fi
 

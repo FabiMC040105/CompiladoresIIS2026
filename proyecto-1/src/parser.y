@@ -42,9 +42,11 @@ entre el lexer y el parser.
     yyin-> flujo de entrada para el archivo del source
     */
 int yylex(void);
+int yyparse(void);
 extern int yylineno;
 void yyerror(const char *s);
 extern FILE *yyin;
+void yyrestart(FILE *input_file);
 
     /*
     Declara las estructuras globales que se utilizan en error_compilacion.
@@ -603,6 +605,263 @@ static NodoAST *ast_unir(NodoAST *primero, NodoAST *segundo)
 
     actual->siguiente = segundo;
     return primero;
+}
+
+/* -------------------------------------------------------------------------
+ * Resolucion y enlazado de #traigase
+ * -------------------------------------------------------------------------
+ * La gramatica conserva cada importacion como AST_IMPORTACION. Una vez
+ * parseado el archivo principal, los modulos importados se parsean con la
+ * misma tabla de simbolos y sus nodos se insertan exactamente en la posicion
+ * del #traigase. Esto permite que funciones y globales de varios archivos
+ * formen un unico programa antes del analisis semantico y la generacion IR.
+ */
+typedef struct ArchivoImportado {
+    char *ruta;
+    struct ArchivoImportado *siguiente;
+} ArchivoImportado;
+
+static ArchivoImportado *archivos_importados = NULL;
+
+static char *duplicar_texto_import(const char *texto)
+{
+    size_t n;
+    char *copia;
+
+    if (texto == NULL) return NULL;
+    n = strlen(texto) + 1;
+    copia = malloc(n);
+    if (copia != NULL) memcpy(copia, texto, n);
+    return copia;
+}
+
+/* Normalizacion minima suficiente para las rutas que produce el compilador. */
+static const char *ruta_sin_prefijo_local(const char *ruta)
+{
+    if (ruta == NULL) return NULL;
+    while (ruta[0] == '.' && (ruta[1] == '/' || ruta[1] == '\\'))
+        ruta += 2;
+    return ruta;
+}
+
+static int archivo_ya_importado(const char *ruta)
+{
+    ArchivoImportado *it;
+    const char *normal = ruta_sin_prefijo_local(ruta);
+
+    for (it = archivos_importados; it != NULL; it = it->siguiente)
+        if (strcmp(ruta_sin_prefijo_local(it->ruta), normal) == 0)
+            return 1;
+    return 0;
+}
+
+static int registrar_archivo_importado(const char *ruta)
+{
+    ArchivoImportado *nuevo;
+
+    if (archivo_ya_importado(ruta)) return 1;
+
+    nuevo = calloc(1, sizeof(*nuevo));
+    if (nuevo == NULL) return 0;
+
+    nuevo->ruta = duplicar_texto_import(ruta);
+    if (nuevo->ruta == NULL) {
+        free(nuevo);
+        return 0;
+    }
+
+    nuevo->siguiente = archivos_importados;
+    archivos_importados = nuevo;
+    return 1;
+}
+
+static void liberar_archivos_importados(void)
+{
+    while (archivos_importados != NULL) {
+        ArchivoImportado *sig = archivos_importados->siguiente;
+        free(archivos_importados->ruta);
+        free(archivos_importados);
+        archivos_importados = sig;
+    }
+}
+
+static int directorio_ruta_import(const char *ruta, char *salida,
+                                  size_t capacidad)
+{
+    const char *b1;
+    const char *b2;
+    const char *b;
+    size_t n;
+
+    if (ruta == NULL || salida == NULL || capacidad == 0) return 0;
+
+    b1 = strrchr(ruta, '/');
+    b2 = strrchr(ruta, '\\');
+    b = b1;
+    if (b2 != NULL && (b == NULL || b2 > b)) b = b2;
+
+    if (b == NULL) {
+        if (capacidad < 2) return 0;
+        strcpy(salida, ".");
+        return 1;
+    }
+
+    n = (size_t)(b - ruta);
+    if (n == 0) n = 1;
+    if (n + 1 > capacidad) return 0;
+
+    memcpy(salida, ruta, n);
+    salida[n] = '\0';
+    return 1;
+}
+
+static int construir_ruta_import(const char *padre, const char *modulo,
+                                 char *salida, size_t capacidad)
+{
+    char dir[1024];
+    int n;
+
+    if (!directorio_ruta_import(padre, dir, sizeof(dir)) ||
+        modulo == NULL || modulo[0] == '\0')
+        return 0;
+
+    /* EXTENSION_E ya fue consumido por la gramatica; valor contiene el nombre. */
+    n = snprintf(salida, capacidad, "%s/%s.e", dir, modulo);
+    return n >= 0 && (size_t)n < capacidad;
+}
+
+static void preparar_parser_import(FILE *archivo)
+{
+    yyin = archivo;
+    yyrestart(archivo);
+    yylineno = 1;
+
+    if (tabla != NULL)
+        tabla->ambito_actual = tabla->ambito_global;
+
+    esperando_tipo_funcion = 0;
+    esperando_nombre_funcion = 0;
+    retorno_lexico = TIPO_DESCONOCIDO;
+    bloque_pendiente = NULL;
+    linea_bloque_pendiente = 0;
+}
+
+static int resolver_importaciones(NodoAST *programa, const char *ruta_padre)
+{
+    NodoAST **enlace;
+
+    if (programa == NULL || programa->tipo != AST_PROGRAMA ||
+        ruta_padre == NULL)
+        return 0;
+
+    enlace = &programa->hijo;
+
+    while (*enlace != NULL) {
+        NodoAST *actual = *enlace;
+
+        if (actual->tipo != AST_IMPORTACION) {
+            enlace = &actual->siguiente;
+            continue;
+        }
+
+        {
+            char ruta[2048];
+            NodoAST *despues = actual->siguiente;
+
+            if (!construir_ruta_import(ruta_padre, actual->valor,
+                                       ruta, sizeof(ruta))) {
+                fprintf(stderr,
+                        "Error: ruta de importacion invalida para '%s'.\n",
+                        actual->valor != NULL ? actual->valor : "");
+                return 0;
+            }
+
+            /* Si ya fue enlazado, el segundo #traigase desaparece del AST. */
+            if (archivo_ya_importado(ruta)) {
+                actual->siguiente = NULL;
+                ast_liberar(actual);
+                *enlace = despues;
+                continue;
+            }
+
+            {
+                FILE *archivo;
+                NodoAST *raiz_guardada;
+                NodoAST *raiz_importada;
+                NodoAST *hijos;
+                NodoAST *cola;
+                int parse_result;
+
+                if (!registrar_archivo_importado(ruta)) {
+                    fprintf(stderr,
+                            "Error: sin memoria para registrar importacion '%s'.\n",
+                            ruta);
+                    return 0;
+                }
+
+                archivo = fopen(ruta, "r");
+                if (archivo == NULL) {
+                    fprintf(stderr,
+                            "Error: no se pudo abrir importacion '%s'.\n",
+                            ruta);
+                    return 0;
+                }
+
+                if (opcion_verbose)
+                    printf("[IMPORT] %s\n", ruta);
+
+                raiz_guardada = raiz;
+                raiz = NULL;
+                preparar_parser_import(archivo);
+                parse_result = yyparse();
+                fclose(archivo);
+                yyin = NULL;
+
+                raiz_importada = raiz;
+                raiz = raiz_guardada;
+
+                if (parse_result != 0 || raiz_importada == NULL) {
+                    if (raiz_importada != NULL)
+                        ast_liberar(raiz_importada);
+                    fprintf(stderr,
+                            "Error: fallo al parsear importacion '%s'.\n",
+                            ruta);
+                    return 0;
+                }
+
+                if (!resolver_importaciones(raiz_importada, ruta)) {
+                    ast_liberar(raiz_importada);
+                    return 0;
+                }
+
+                /* Desacopla los hijos del AST importado y reemplaza el
+                   AST_IMPORTACION en su posicion original. */
+                hijos = raiz_importada->hijo;
+                raiz_importada->hijo = NULL;
+                ast_liberar(raiz_importada);
+
+                actual->siguiente = NULL;
+                ast_liberar(actual);
+
+                if (hijos == NULL) {
+                    *enlace = despues;
+                    continue;
+                }
+
+                cola = hijos;
+                while (cola->siguiente != NULL)
+                    cola = cola->siguiente;
+
+                cola->siguiente = despues;
+                *enlace = hijos;
+
+                /* Los hijos importados ya fueron resueltos recursivamente. */
+                enlace = &cola->siguiente;
+            }
+        }
+    }
+
+    return 1;
 }
 
 /* Cambia el valor de un nodo sin perder el valor anterior
@@ -1834,6 +2093,14 @@ int main(int argc, char *argv[])
     fclose(entrada);
     entrada = NULL;
 
+    /* Enlaza todos los modulos antes del analisis semantico. */
+    if (resultado == 0 && raiz != NULL)
+    {
+        if (!registrar_archivo_importado(archivo_fuente) ||
+            !resolver_importaciones(raiz, archivo_fuente))
+            resultado = 1;
+    }
+
     if (resultado == 0)
     {
         if (opcion_verbose)
@@ -2298,6 +2565,7 @@ int main(int argc, char *argv[])
     */
         parser_liberar_marcas();
         parser_liberar_contextos_funciones();
+        liberar_archivos_importados();
         ts_destruir(tabla);
         tabla = NULL;
         return errores_semanticos == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -2311,6 +2579,7 @@ int main(int argc, char *argv[])
     raiz = NULL;
     parser_liberar_marcas();
     parser_liberar_contextos_funciones();
+    liberar_archivos_importados();
     ts_destruir(tabla);
     tabla = NULL;
     return EXIT_FAILURE;
@@ -2331,6 +2600,7 @@ error_compilacion:
     }
     parser_liberar_marcas();
     parser_liberar_contextos_funciones();
+    liberar_archivos_importados();
     ts_destruir(tabla);
     tabla = NULL;
     return EXIT_FAILURE;
