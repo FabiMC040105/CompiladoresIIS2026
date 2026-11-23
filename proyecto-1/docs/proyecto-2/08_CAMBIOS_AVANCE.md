@@ -1,69 +1,38 @@
-# 8. Trazabilidad de esta actualización y resultados
+# 8. Cambios observados respecto del ZIP `integration-ir-optimizaciones-local`
 
-## 8.1 Comparación con el ZIP anterior
+Se compararon las rutas internas y el hash SHA-256 de archivos entre el ZIP previo `CompiladoresIIS2026-integration-ir-optimizaciones-local (1).zip` y el actual `CompiladoresIIS2026-fix-integracion-final(1).zip`. Se detectaron **32 archivos nuevos**, **11 archivos modificados** y **ninguno eliminado**. Estas cifras corresponden a archivos regulares, no directorios.
 
-Se comparó el contenido de ambos ZIP por ruta interna y hash de archivo. **Únicamente seis archivos de `proyecto-1/src/` cambiaron.** No se detectaron cambios en `ide/` ni en los documentos originales del repositorio.
+## 8.1 Archivos modificados
 
-| Archivo | Cambio observado | Efecto sobre documentación |
-|---|---|---|
-| `Makefile` | Añade `loop_unrolling.c` a las fuentes de `prueba_integracion_opt_ir`. | El test de integración enlaza correctamente el coordinador que contiene unrolling. |
-| `loop_unrolling.c` | La función que emite copias conserva `nodo_origen`. | El backend mantiene acceso al AST de origen para resolver símbolos/ámbitos durante la traducción. |
-| `optimizaciones_ir.h` | Añade `OPT_IR_UNROLL`, incluye esta fase en `OPT_IR_TODAS`, registra `LoopUnrollStats` y declara `opt_ir_aplicar_config`. | El coordinador gestiona cinco fases y estadísticas de unrolling. |
-| `optimizaciones_ir.c` | Ejecuta unrolling **antes** de DCE, renombramiento, reordenamiento y spilling. Añade la impresión de estadísticas. | Se unifican fases en un pipeline y se conserva la API antigua con factor 2. |
-| `parser.y` | Integra `--unroll N` a la máscara de fases; elimina la restricción de `--ir-cfg`; permite spilling al codegen IR y llama a la nueva API. | Unrolling y spilling ahora pueden incluirse en la ruta de generación de código desde IR. |
-| `codegen_ir.c` | Reserva espacio de memoria para slots de spilling; traduce pseudoaccesos `cdff_spill_area` a `LOAD/STORE` y ajusta el límite de datos. | El backend IR ya implementa el descenso básico de accesos de spilling a instrucciones LSU. |
+| Archivo | Área y cambio principal |
+|---|---|
+| `proyecto-1/src/codegen_ir.c` y `.h` | Backend IR, asignación por coloreo y materialización de operaciones de memoria/spill. |
+| `proyecto-1/src/spill_transform.c` | Transformación y gestión de presión de registros. |
+| `proyecto-1/src/codegen.c` | Ajustes al backend original. |
+| `proyecto-1/src/parser.y` | Cambios en rutas de generación, opciones e integración. |
+| `proyecto-1/src/Makefile` | Nuevas metas para pruebas integradas, importaciones, métricas y entrega. |
+| `proyecto-1/src/probar_codegen_ir_backend.sh` | Escenarios de backend y su validación. |
+| `proyecto-1/src/pruebas/test_codegen_ir_runtime.c` | Pruebas de backend IR. |
+| `proyecto-1/src/pruebas/simular_asm_ir.py` | Simulador funcional para comparar resultados y RAW. |
+| `proyecto-1/src/factorial.asm` y `ejercicio_modulo.e` | Actualizaciones en casos/artefactos de ejemplo. |
+| `proyecto-1/src/.gitignore` | Ajustes de exclusiones para salidas generadas. |
 
-## 8.2 Secuencia de fases documentada desde el código
+## 8.2 Archivos nuevos destacados
 
-```text
-parser.y
-   |
-   +-- opt_ir_aplicar_config(IR, mascara, 9, 4, factor, stats)
-           |
-           +-- clonar IR original
-           +-- Loop Unrolling (si está activo)
-           +-- DCE
-           +-- Renombramiento
-           +-- Reordenamiento
-           +-- Spilling
-           +-- reemplazar IR y registrar estadísticas
-   |
-   +-- codegen_ir_generar_archivo(IR, ...) [solo con --codegen-ir]
-           |
-           +-- identificar temporales / slots de spilling
-           +-- reservar memoria IR y slots
-           +-- traducir cargas, escrituras y demás instrucciones
-           +-- emitir ensamblador
-   |
-   +-- resolver etiquetas → empaquetar bundles → binario
-```
+- `proyecto-1/docs/SPILLING_REGISTER.md`: descripción interna de grafo, coloreo, asignación y transformación de spills.
+- `pruebas/suite_optimizaciones_vliw/`: **15 archivos `.e`**, organizados en cinco categorías.
+- `pruebas/medir_suite_optimizaciones.py`: comparación de baseline y versión optimizada, verificación de resultados y generación de métricas gráficas.
+- `pruebas/probar_spilling_obligatorio.sh` y tres entradas `spill_0*_...e`: presión de 10, 12 y 14 argumentos.
+- `pruebas/probar_importaciones.sh` y `pruebas/importaciones/`: `#traigase`, importaciones anidadas y reporte de errores.
+- `pruebas/integracion_3_opt.e` y `pruebas/compilar_integracion_3_opt.sh`: ejecución de cuatro banderas de optimización (independientemente del nombre histórico).
+- `pruebas/probar_integracion_rtl_actual.sh` y `pruebas/tb_integracion_rtl_actual.sv`: ruta de compilador optimizado a CPU, L1, L2 y memoria del RTL actual.
 
-En la ruta de visualización, `--ir-cfg` finaliza sin código máquina; en modo backend IR se vuelve a construir y optimizar la IR. Esto debe tenerse presente al comparar la IR impresa con el ensamblador generado.
+**Importante:** el ZIP trae también binarios y ensambladores de ejemplo en `pruebas/importaciones/`. No son evidencia de que la revisión local actual los haya recompilado.
 
-## 8.3 Evidencia local obtenida
+## 8.3 Cambios que deben reflejarse en la defensa
 
-Los siguientes comandos se ejecutaron sobre la copia extraída del archivo actualizado:
-
-```bash
-cd proyecto-1/src
-make test-loop-unrolling
-make test-opt-modulos
-bash probar_codegen_ir_backend.sh
-```
-
-Los tres finalizaron con código 0. La salida de `test-loop-unrolling` informó `PASS: Loop Unrolling y equivalencia de resultados`; la integración IR reportó `PASS integracion de optimizaciones IR`. El backend informó diez casos completados y resolución de etiquetas. Los cinco archivos de prueba Python del IDE completaron 49 pruebas en total.
-
-Intenté también `make rebuild`; se detuvo al ejecutar `bison` porque el binario no se encontraba disponible en el entorno de revisión. No se atribuye este error al compilador. **No se verificó el ejecutable `cdff` reconstruido**, la ejecución RTL ni las cinco fases activas a la vez sobre un programa fuente real.
-
-## 8.4 Distinción entre capacidad incorporada y validación
-
-- **Incorporado al código:** factores de desenrollamiento 2–16 aplicados por el coordinador y acceso a memoria de spilling desde el backend IR.
-- **Verificado con pruebas:** transformaciones unitarias del IR, varios casos de integración de cuatro fases con valor equivalente, diez escenarios autónomos de backend IR y los módulos del IDE.
-- **Aún no demostrado:** que un caso `.e` con unrolling y spilling efectivos pase correctamente por frontend, las cinco fases, emisión ASM, bundles binarios y RTL.
-
-## 8.5 Observaciones para mantenimiento
-
-1. El mensaje de ayuda de `--unroll` sigue mostrando un requisito anterior que ya fue eliminado del flujo real.
-2. Algunos comentarios en `parser.y`, `optimizaciones_ir.h` y `spill_transform.h` todavía dicen que el descenso de spilling al backend es futuro, aunque ya existe código para implementarlo.
-3. `pruebas/prueba_integracion_opt_ir.c` conserva impresiones como «cuatro optimizaciones». La máscara `OPT_IR_TODAS` ya incluye cinco, pero los casos que no contienen un ciclo admisible no ejercitan unrolling de manera efectiva.
-4. Antes de entregar, los resultados deben repetirse sobre el hash final del repositorio compartido.
+1. La asignación del backend IR emplea **Chaitin con registros `x4`–`x12`**, y los spill a memoria se traducen con `x13` para la dirección, no con el anterior ejemplo que suponía `x11`.
+2. Ya hay **programas de prueba** para los cinco grupos exigidos por el profesor, con un runner que puede generar un reporte gráfico.
+3. Se añadió un test de integración de compilador y RTL actual (incluyendo métricas de caché) que debe verificarse contra la rama correcta del repositorio de Arquitectura.
+4. El proyecto ofrece objetivos `make test-entrega-local` y `make test-entrega`; el segundo depende además del repositorio de CE4301.
+5. Esta documentación puede subirse por adelantado a `main`, pero sus afirmaciones sobre el código corresponden a la rama/copia analizada hasta que se fusionen los cambios.

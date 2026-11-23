@@ -1,0 +1,25 @@
+@startuml
+skinparam monochrome true
+skinparam shadowing false
+skinparam componentStyle rectangle
+package "Proyecto CE1108" {
+  [Archivo .e] as E
+  [cdff
+Parser, AST, IR] as C
+  [5 optimizaciones IR] as O
+  [Backend IR / Chaitin] as B
+  [ASM / bundles .bin] as V
+  [Simulador ASM] as S
+}
+package "Proyecto CE4301 (repositorio externo)" {
+  [top.sv + L1/L2/RAM] as T
+  [Testbench RTL actual] as TB
+}
+E --> C
+C --> O
+O --> B
+B --> V
+V --> S
+V --> T
+T --> TB
+@enduml

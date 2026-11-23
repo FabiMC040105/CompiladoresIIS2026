@@ -116,22 +116,26 @@ El compilador calcula variables vivas, construye un grafo de interferencia e int
 
 Para mantener la compatibilidad de la IR, las recargas y escrituras internas usan `IR_ARRAY_LOAD` e `IR_ARRAY_STORE`; `cdff_spill_area` **no es un arreglo definido por el usuario**, sino un identificador reservado para el proceso de optimización.
 
-**Cambio en este avance:** `codegen_ir.c` ya reconoce esos accesos internos y los baja a instrucciones válidas de memoria:
+**Backend IR actual (`codegen_ir.c`):**
 
-- Recorre la IR para determinar cuántos slots de spilling fueron utilizados.
-- Reserva el área inmediatamente después de la memoria de temporales IR, a su vez ubicada después de las variables globales.
-- Calcula la dirección en bytes como `inicio_spilling + slot * TAMANO_PALABRA`.
-- Usa `x11` como registro base de la dirección y `x4` como registro de dato para emitir `LSU LOAD` o `LSU STORE`.
-- Comprueba índices válidos y límites de la memoria de 64 KB; actualiza `limite_datos_ir` para evitar que el área invada la configuración de datos/pila.
+- Detecta los accesos al identificador reservado `cdff_spill_area` como `IR_ARRAY_STORE` e `IR_ARRAY_LOAD`.
+- Reserva slots de cuatro bytes en una región que no se superpone con los datos globales y los temporales internos, verificando que se respete el límite de memoria.
+- Materializa el **cálculo de dirección en `x13`** y genera `LSU STORE xN, 0(x13)` o `LSU LOAD xN, 0(x13)` según el registro asignado. Si el destino no tiene color válido, emplea `x3` como auxiliar y la ruta de escritura al destino correspondiente.
+- Los temporales coloreables se asignan a **nueve registros `x4`–`x12`**; el resolvedor puede rechazar presión excesiva si no se activa spilling.
+- La baseline de diagnóstico `--codegen-ir-mem` desactiva el mapeo Chaitin para permitir comparación con temporales en memoria. **No equivale** al modo normal sin optimizaciones en programas con alta presión.
 
-**Restricción:** los accesos ya pueden traducirse, pero falta un test integrado que fuerce spilling a partir de un `.e` y compruebe un resultado correcto después de compilar, ensamblar y ejecutar en el entorno VLIW. No corresponde afirmar cumplimiento extremo a extremo únicamente con la presencia de esta implementación.
+**Nueva evidencia preparada en el avance:** `make test-spill-obligatorio` comprueba tres archivos `.e` con presión de 10, 12 y 14 argumentos. El script exige valores no nulos de `STORE`, `LOAD` y slots de spilling en el log, y verifica que el ASM contenga operaciones LSU con `x13` y que se genere binario. `make test-spill-completo` combina estas comprobaciones con pruebas modulares y backend IR. Su ejecución completa requiere un `cdff` compilado y no se certifica únicamente por inspeccionar el script.
 
-**Validación existente:** `prueba_spill_transform.c`, `prueba_grafo_interferencia.c` y `prueba_integracion_opt_ir.c` pasaron. La prueba de backend IR disponible actualmente cubre diez casos funcionales, pero **no prueba específicamente los slots `cdff_spill_area`**.
+**Verificación modular efectuada:** los módulos de grafos, transformación y coordinación de IR pasaron los casos incluidos. Para la validez funcional de los programas completos, la suite de 15 casos compara valores esperados y exige **RAW = 0** usando `simular_asm_ir.py`. Ver [09_SUITE_Y_METRICAS.md](09_SUITE_Y_METRICAS.md).
 
 ## 3.8 Integración con el backend VLIW
 
-El procesador utiliza bundles de 128 bits con cuatro slots de 32 bits: ALU, LSU, BRU y FEIST. El ensamblador se resuelve mediante `resolucion_etiquetas.c`, se empaqueta en `vliw_packer.c` y se codifica con `binario.c`; los slots vacíos utilizan ceros.
+El procesador objetivo utiliza bundles de 128 bits con cuatro slots de 32 bits: ALU, LSU, BRU y FEIST. El ensamblador se resuelve mediante `resolucion_etiquetas.c`, se empaqueta en `vliw_packer.c` y se codifica con `binario.c`; los slots vacíos utilizan ceros.
 
 En `parser.y`, sin `--codegen-ir` se mantiene el backend tradicional desde AST. Con `--codegen-ir` se reconstruye una IR desde el AST, se aplican las fases solicitadas y `codegen_ir_generar_archivo()` produce ASM. Las fases de análisis IR que se muestran al usuario no se reutilizan por referencia; el backend vuelve a generar y optimizar su propia copia.
 
 **El comportamiento correcto del código generado y su mejora de rendimiento requieren validación adicional** con los benchmarks y la implementación RTL de Arquitectura de Computadores I. Una reducción de instrucciones IR no es una prueba directa de reducción de ciclos, misses o energía.
+
+## 3.9 Pruebas de interacción y medición de las fases
+
+El avance agrega entradas `.e` por optimización en `pruebas/suite_optimizaciones_vliw/` y una herramienta que compara código base/optimizado en **instrucciones IR, tamaño de código, ciclos estimados, tiempo de compilación y transformaciones**. Los casos fuerzan una transformación real de la fase aislada. El resultado no siempre mejora simultáneamente las cinco métricas: unrolling puede aumentar bytes y el compilador puede tardar más. Ver [09_SUITE_Y_METRICAS.md](09_SUITE_Y_METRICAS.md).

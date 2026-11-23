@@ -29,7 +29,7 @@ flowchart TD
 
 **Distinción importante:** en `parser.y` hay una IR para inspección y otra generada de nuevo cuando se selecciona `--codegen-ir`. Ambas se optimizan con `opt_ir_aplicar_config()`, por lo que `--unroll` y `--spill-ir` **sí llegan al backend IR** en esta revisión. Sin `--codegen-ir`, las fases de optimización IR no sustituyen al backend tradicional; la bandera `--spill` además habilita un mecanismo propio del backend AST. `--ir-cfg` imprime el CFG y termina sin emitir ensamblador, según la lógica actual.
 
-**Límite de la verificación:** comprobar que el backend admite la transformación no significa que se haya validado un programa real ejecutando las cinco fases simultáneamente en RTL. Ese paso sigue pendiente.
+**Nuevo en `fix-integracion-final`:** `pruebas/probar_integracion_rtl_actual.sh` propone la ruta completa `.e → IR optimizada → ASM → binario VLIW → RTL`; `pruebas/tb_integracion_rtl_actual.sv` observa el dato esperado en L2. La existencia de ese test no sustituye ejecutarlo en el RTL compatible.
 
 ## 2.2 Organización de módulos
 
@@ -49,6 +49,7 @@ flowchart TD
 | Coordinador | `optimizaciones_ir.c` | Aplicar fases en orden sobre una copia del IR. |
 | Backend | `codegen.c`, `codegen_ir.c`, `scheduler.c`, `vliw_packer.c`, `binario.c` | Traducir, calendarizar, empaquetar y codificar. |
 | IDE | `ide/app.py`, `ide/index.html`, `ide/ide_*.c`, `ide/ll1_predict.c` | Edición, sugerencias, errores, clones y compilación. |
+| Pruebas y medición | `pruebas/medir_suite_optimizaciones.py`, `pruebas/probar_importaciones.sh`, `pruebas/probar_integracion_rtl_actual.sh` | Comparar código base/optimizado, comprobar resultados y ejecutar integración con CE4301. |
 
 ## 2.3 Diagrama UML de clases/estructuras principales
 
@@ -141,3 +142,7 @@ flowchart LR
 - El IDE ejecuta `cdff` como proceso independiente. Su analizador LL(1) auxiliar está orientado a sugerencias/correcciones, y **no sustituye** la validación del parser Flex/Bison del compilador.
 - El detector de clones opera desde el IDE y puede comparar archivos diferentes; el servidor presenta los resultados a la interfaz.
 - Los detalles del hardware y sus contadores no pueden darse por comprobados a partir de los tests unitarios de IR.
+
+## 2.7 Diagrama de integración con CE4301
+
+El archivo [integracion_pruebas.puml](diagramas/integracion_pruebas.puml) separa el compilador, el simulador de ensamblador y el testbench del RTL externo de Arquitectura. Esta separación ayuda a identificar qué pruebas pueden ejecutarse sin repositorio de hardware y cuáles requieren código de ambas materias.

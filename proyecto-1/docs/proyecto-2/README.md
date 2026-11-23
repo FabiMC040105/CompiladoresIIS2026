@@ -2,49 +2,36 @@
 
 **Instituto Tecnológico de Costa Rica · CE1108 · II semestre de 2026**
 
-Esta documentación describe la implementación disponible del compilador **CDFF**, su IDE y su integración con un backend VLIW. Está redactada a partir del último ZIP recibido el **22 de noviembre de 2026** (archivos internos con fecha del 23 de noviembre de 2026 a las 01:15 UTC), de la especificación oficial del Proyecto Grupal II y de pruebas ejecutadas sobre esa misma copia del código.
+**Versión documentada:** archivo `CompiladoresIIS2026-fix-integracion-final(1).zip`, último avance compartido el 22 de noviembre de 2026 (hora de Costa Rica). Esta documentación corresponde al **contenido de esa rama/copia**, no implica que se haya fusionado a `main` ni que se hayan corregido los errores futuros.
 
-## Índice
+## Contenido
 
-| Documento | Tema |
-|---|---|
-| [01 — Introducción y ambiente](01_INTRODUCCION_AMBIENTE.md) | Contexto, objetivos y herramientas. |
-| [02 — Diseño y diagramas](02_DISENO_DIAGRAMAS.md) | Arquitectura del compilador, UML y funcionalidades del IDE. |
-| [03 — IR y optimizaciones](03_OPTIMIZACIONES.md) | CFG, DCE, renombramiento, reordenamiento, spilling y loop unrolling. |
-| [04 — Uso y validación](04_USO_Y_VALIDACION.md) | Comandos WSL, banderas, pruebas realmente ejecutadas y tablas para métricas. |
-| [05 — Atributos CI y PM](05_ATRIBUTOS_CI_PM.md) | Preguntas y respuestas exigidas por el profesor. |
-| [06 — Bitácora y cierre](06_BITACORA_CIERRE.md) | Horas por integrante por completar, conclusiones, recomendaciones y referencias. |
-| [07 — Pendientes](07_PENDIENTES.md) | Validaciones y evidencias que aún hacen falta. |
-| [08 — Cambios del avance](08_CAMBIOS_AVANCE.md) | Comparación puntual de los seis archivos cambiados y trazabilidad de las pruebas. |
+| Archivo | Sección | Contenido |
+|---|---|---|
+| [01_INTRODUCCION_AMBIENTE.md](01_INTRODUCCION_AMBIENTE.md) | Introducción y ambiente | Objetivos, tecnologías, estructura y dependencias. |
+| [02_DISENO_DIAGRAMAS.md](02_DISENO_DIAGRAMAS.md) | Diseño | Arquitectura, flujo, diagramas UML, módulos e IDE. |
+| [03_OPTIMIZACIONES.md](03_OPTIMIZACIONES.md) | Optimizaciones | IR, CFG, liveness, DCE, renombramiento, reordenamiento, unrolling y spilling. |
+| [04_USO_Y_VALIDACION.md](04_USO_Y_VALIDACION.md) | Uso y validación | Instalación WSL, comandos, pruebas locales y límites. |
+| [05_ATRIBUTOS_CI_PM.md](05_ATRIBUTOS_CI_PM.md) | Atributos | Preguntas y respuestas para CI y PM exigidas por el profesor. |
+| [06_BITACORA_CIERRE.md](06_BITACORA_CIERRE.md) | Cierre | Bitácora por integrante, conclusiones, recomendaciones y referencias. |
+| [07_PENDIENTES.md](07_PENDIENTES.md) | Pendientes | Lista priorizada de verificación final y diferencias entre ramas. |
+| [08_CAMBIOS_AVANCE.md](08_CAMBIOS_AVANCE.md) | Trazabilidad | Diferencias concretas respecto del ZIP `integration-ir-optimizaciones-local`. |
+| [09_SUITE_Y_METRICAS.md](09_SUITE_Y_METRICAS.md) | Benchmarks | 15 programas obligatorios, medición, gráficos y condiciones para interpretar cifras. |
+| [10_INTEGRACION_Y_IMPORTACIONES.md](10_INTEGRACION_Y_IMPORTACIONES.md) | Integración | Pruebas de importaciones, optimizaciones juntas y ejecución con RTL de CE4301. |
+| [11_VERIFICACION_LOCAL.md](11_VERIFICACION_LOCAL.md) | Evidencia | Comprobaciones ejecutadas sobre el ZIP, reproducibilidad y limitaciones del entorno. |
 
-Los fuentes editables de diagramas UML se encuentran en [diagramas/](diagramas/).
+**Diagramas UML editables:** [diagramas/](diagramas/).
 
-## Estado de esta revisión
+## Estado resumido
 
-Las cinco fases IR están integradas en el coordinador: **Loop Unrolling → DCE → Renombramiento → Reordenamiento → Spilling**. El código más reciente también añadió al backend IR la reserva de slots internos de spilling y su traducción a instrucciones de memoria. Las pruebas modulares y las diez pruebas autónomas del backend pasaron, junto con 49 pruebas Python del IDE.
+El código actual integra **Loop Unrolling → DCE → Renombramiento → Reordenamiento → Spilling**, con generación de ensamblador desde IR mediante `--codegen-ir`, asignación de temporales por grafo de interferencia/coloreo y empaquetamiento en bundles VLIW.
 
-**Esto no implica que la integración final en RTL esté comprobada.** Falta generar y ejecutar programas de demostración de las cinco fases desde archivos fuente `.e`, registrar las métricas y completar la bitácora real. Además, en el entorno de análisis utilizado faltaba `bison`, por lo que `make rebuild` no pudo completarse aquí.
+El nuevo avance añade una **suite de 15 programas evaluables**, scripts de métricas gráficas, tres pruebas de spilling orientadas al recorrido IR→ASM/binario, casos de importación mediante `#traigase` y un testbench de integración con el RTL actual de Arquitectura. Estos artefactos existen en el ZIP; **no todos pudieron ejecutarse durante esta revisión** por falta de Flex/Bison para construir `cdff` y de una copia del RTL de destino validada en este entorno.
 
-## Cómo agregar esta carpeta al repositorio desde WSL
+Las pruebas modulares que no requieren construir `cdff` y 58 pruebas Python del IDE, más 6 del frontend JS, pasaron. Los resultados concretos y el alcance están en [11_VERIFICACION_LOCAL.md](11_VERIFICACION_LOCAL.md).
 
-Este ZIP contiene únicamente la ruta `proyecto-1/docs/proyecto-2/`; no reemplaza archivos `.c`, `.h`, `parser.y` ni `Makefile`.
+## Cómo integrar esta documentación al repositorio
 
-Desde la raíz de un clon actualizado y **sin cambios locales pendientes**, descomprimir el ZIP descargado:
+Se puede agregar `proyecto-1/docs/proyecto-2/` a `main` **antes** del código de las ramas de desarrollo, siempre que se indique que describe el avance `fix-integracion-final`. Al fusionar el código después, repetir las pruebas en `main` y ajustar los documentos al commit final. La ruta elegida no sobrescribe `README.md`, archivos fuente ni documentación histórica de otras carpetas.
 
-```bash
-unzip '/mnt/c/Users/TU_USUARIO/Downloads/documentacion_compiladores_actualizada.zip' -d .
-git status --short
-git add proyecto-1/docs/proyecto-2
-git diff --cached --stat
-git commit -m 'docs: actualizar documentacion del Proyecto II con integracion IR'
-git push origin main
-```
-
-La ruta de Descargas debe ajustarse al nombre real del usuario de Windows. Antes de hacer `git pull --ff-only origin main`, confirmar que está en la rama correcta y que no haya trabajo sin guardar o cambios del equipo por integrar. Si el repositorio requiere pull request, respetar ese flujo en vez de hacer push directo.
-
-## Fuente y límites de verificación
-
-- Especificación oficial del Proyecto Grupal II de CE1108/CE4301, II semestre 2026.
-- Archivos de `proyecto-1/src/`, `ide/` y documentación existente del repositorio.
-- Pruebas realizadas localmente sobre la copia recibida, **no** sobre el hash final de `main`.
-- Los marcadores como `[Nombre]`, `[Horas]` y `Pendiente` deben completarse con información real del grupo; no se inventaron resultados ni nombres de otros integrantes.
+La especificación del profesor (sección 8.2.1) solicita también una bitácora con horas reales por estudiante. Está dejada como plantilla, no como información inventada.
