@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="650" viewBox="0 0 1500 650">
+<rect width="100%" height="100%" fill="white"/>
+<text x="750.0" y="34" text-anchor="middle" font-family="Arial" font-size="24">Transformaciones aplicadas</text>
+<line x1="80" y1="480" x2="1470" y2="480" stroke="black"/>
+<line x1="80" y1="70" x2="80" y2="480" stroke="black"/>
+<line x1="75" y1="480.0" x2="1470" y2="480.0" stroke="#ddd"/>
+<text x="70" y="485.0" text-anchor="end" font-family="Arial" font-size="12">0</text>
+<line x1="75" y1="398.0" x2="1470" y2="398.0" stroke="#ddd"/>
+<text x="70" y="403.0" text-anchor="end" font-family="Arial" font-size="12">2</text>
+<line x1="75" y1="316.0" x2="1470" y2="316.0" stroke="#ddd"/>
+<text x="70" y="321.0" text-anchor="end" font-family="Arial" font-size="12">5</text>
+<line x1="75" y1="234.0" x2="1470" y2="234.0" stroke="#ddd"/>
+<text x="70" y="239.0" text-anchor="end" font-family="Arial" font-size="12">7</text>
+<line x1="75" y1="152.0" x2="1470" y2="152.0" stroke="#ddd"/>
+<text x="70" y="157.0" text-anchor="end" font-family="Arial" font-size="12">10</text>
+<line x1="75" y1="70.0" x2="1470" y2="70.0" stroke="#ddd"/>
+<text x="70" y="75.0" text-anchor="end" font-family="Arial" font-size="12">12</text>
+<rect x="98.7" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="129.9" y="445.8" width="24.0" height="34.2" fill="#222"/>
+<text x="126.3" y="498" transform="rotate(55 126.3 498)" font-family="Arial" font-size="11">unroll_01</text>
+<rect x="191.4" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="222.6" y="445.8" width="24.0" height="34.2" fill="#222"/>
+<text x="219.0" y="498" transform="rotate(55 219.0 498)" font-family="Arial" font-size="11">unroll_02</text>
+<rect x="284.1" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="315.3" y="445.8" width="24.0" height="34.2" fill="#222"/>
+<text x="311.7" y="498" transform="rotate(55 311.7 498)" font-family="Arial" font-size="11">unroll_03</text>
+<rect x="376.7" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="407.9" y="445.8" width="24.0" height="34.2" fill="#222"/>
+<text x="404.3" y="498" transform="rotate(55 404.3 498)" font-family="Arial" font-size="11">dce_01</text>
+<rect x="469.4" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="500.6" y="445.8" width="24.0" height="34.2" fill="#222"/>
+<text x="497.0" y="498" transform="rotate(55 497.0 498)" font-family="Arial" font-size="11">dce_02</text>
+<rect x="562.1" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="593.3" y="445.8" width="24.0" height="34.2" fill="#222"/>
+<text x="589.7" y="498" transform="rotate(55 589.7 498)" font-family="Arial" font-size="11">dce_03</text>
+<rect x="654.7" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="685.9" y="445.8" width="24.0" height="34.2" fill="#222"/>
+<text x="682.3" y="498" transform="rotate(55 682.3 498)" font-family="Arial" font-size="11">ren_01</text>
+<rect x="747.4" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="778.6" y="343.3" width="24.0" height="136.7" fill="#222"/>
+<text x="775.0" y="498" transform="rotate(55 775.0 498)" font-family="Arial" font-size="11">ren_02</text>
+<rect x="840.1" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="871.3" y="411.7" width="24.0" height="68.3" fill="#222"/>
+<text x="867.7" y="498" transform="rotate(55 867.7 498)" font-family="Arial" font-size="11">ren_03</text>
+<rect x="932.7" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="963.9" y="70.0" width="24.0" height="410.0" fill="#222"/>
+<text x="960.3" y="498" transform="rotate(55 960.3 498)" font-family="Arial" font-size="11">reo_01</text>
+<rect x="1025.4" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="1056.6" y="275.0" width="24.0" height="205.0" fill="#222"/>
+<text x="1053.0" y="498" transform="rotate(55 1053.0 498)" font-family="Arial" font-size="11">reo_02</text>
+<rect x="1118.1" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="1149.3" y="240.8" width="24.0" height="239.2" fill="#222"/>
+<text x="1145.7" y="498" transform="rotate(55 1145.7 498)" font-family="Arial" font-size="11">reo_03</text>
+<rect x="1210.7" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="1241.9" y="343.3" width="24.0" height="136.7" fill="#222"/>
+<text x="1238.3" y="498" transform="rotate(55 1238.3 498)" font-family="Arial" font-size="11">spill_01</text>
+<rect x="1303.4" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="1334.6" y="206.7" width="24.0" height="273.3" fill="#222"/>
+<text x="1331.0" y="498" transform="rotate(55 1331.0 498)" font-family="Arial" font-size="11">spill_02</text>
+<rect x="1396.1" y="480.0" width="24.0" height="0.0" fill="#777"/>
+<rect x="1427.3" y="70.0" width="24.0" height="410.0" fill="#222"/>
+<text x="1423.7" y="498" transform="rotate(55 1423.7 498)" font-family="Arial" font-size="11">spill_03</text>
+<rect x="1250" y="20" width="14" height="14" fill="#777"/><text x="1270" y="32" font-family="Arial" font-size="12">Base</text>
+<rect x="1330" y="20" width="14" height="14" fill="#222"/><text x="1350" y="32" font-family="Arial" font-size="12">Optimizado</text>
+<text x="20" y="275.0" transform="rotate(-90 20 275.0)" font-family="Arial" font-size="13">cantidad</text>
+</svg>
