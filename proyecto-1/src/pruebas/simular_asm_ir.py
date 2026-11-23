@@ -379,7 +379,7 @@ def _encabezado(titulo):
 def _estado(salida):
     r = salida['resultado']
     if r['esperado'] is None:
-        return 'SIN COMPROBAR (se ejecuto, pero no se especifico resultado esperado)'
+        return 'Ejecucion completada. Resultado no validado'
     return (f'CORRECTO: RAM[{r["direccion"]}] = {r["obtenido"]} '
             f'(esperado {r["esperado"]})')
 
@@ -411,7 +411,7 @@ def _reporte_una(salida, *, etiqueta='SIMULACION'):
         print(f'  {clave:<36} {_numero(valor):>12}')
     rams = list(salida['memoria_escrita'].items())[-8:]
     if salida['resultado']['esperado'] is None:
-        print('\n  Ultimas posiciones de RAM escritas (NO son resultados verificados):')
+        print('\n  Ultimas escrituras en memoria:')
         print('  ' + (', '.join(f'[{d}]={v}' for d, v in rams) if rams else '(ninguna)'))
     if salida['estadisticas'].get('riesgos_raw', 0):
         print('\n  ATENCION: se detectaron dependencias RAW segun separacion de 3 ciclos.')
@@ -425,10 +425,11 @@ def _porcentaje(antes, despues):
 
 def _reporte_comparacion(base, opt):
     _encabezado('COMPARACION  |  Antes vs. despues')
-    print('BASE:       ' + base['archivo'])
-    print('COMPARADO:  ' + opt['archivo'])
-    print('BASE:       ' + _estado(base))
-    print('COMPARADO:  ' + _estado(opt))
+    # Mostramos cada archivo junto con su estado para evitar etiquetas repetidas.
+    print('Archivo base:       ' + base['archivo'])
+    print('Archivo optimizado: ' + opt['archivo'])
+    print('Estado base:        ' + _estado(base))
+    print('Estado optimizado:  ' + _estado(opt))
     print('-' * 78)
     print(f'{"METRICA":<35} {"BASE":>11} {"COMPARADO":>11}  {"CAMBIO":>13}')
     print('-' * 78)
@@ -439,8 +440,8 @@ def _reporte_comparacion(base, opt):
     if base['resultado']['esperado'] is not None:
         print('RESULTADOS: ambos resultados comprobados contra el valor esperado.')
     else:
-        print('RESULTADOS: NO verificados. Los ciclos pueden compararse, no la equivalencia.')
-    print('IMPORTANTE: los ciclos son de emision funcional, NO ciclos totales RTL.')
+        print('Comparacion de ciclos completada. Equivalencia funcional pendiente de validar')
+    print('Modelo funcional VLIW: un bundle emitido equivale a un ciclo. No incluye temporizacion RTL')
 
 
 def _filas_elegidas(salida, rango_ciclos):
@@ -602,7 +603,7 @@ def _seleccionar_asm(titulo):
         ruta = Path(respuesta).expanduser()
         if ruta.is_file():
             return str(ruta)
-        print('  No se encontro el archivo. Escribi un numero o una ruta valida.')
+        print('  Archivo no encontrado. Ingrese una ruta valida o seleccione un numero de la lista')
 
 
 def _consultar_resultado():
