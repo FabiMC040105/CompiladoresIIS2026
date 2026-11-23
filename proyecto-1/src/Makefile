@@ -243,6 +243,12 @@ test-integracion: all check-arqui
 test-feist-auto: all check-arqui
 	ARQ_ROOT="$(ARQ_ROOT)" bash ./validar_feist_auto.sh
 
+# Integracion actual CE1108 -> CE4301: compila un programa optimizado,
+# valida su ASM y ejecuta el binario sobre CPU + L1 + L2 + RAM reales.
+.PHONY: test-rtl-actual
+test-rtl-actual: all check-arqui
+	ARQ_ROOT="$(ARQ_ROOT)" bash pruebas/probar_integracion_rtl_actual.sh
+
 sim: test-integracion
 
 test-completo: test test-integracion test-feist-auto
