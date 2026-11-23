@@ -19,3 +19,11 @@ lexer
 /*.resuelto.asm
 /prueba_vliw_entrada.tmp
 /prueba_vliw_salida.tmp
+
+# Evidencia generada por pruebas de spilling
+/pruebas/spill_*.asm
+/pruebas/spill_*.bin
+
+# Salidas generadas por prueba de backend de spilling
+/pruebas/prueba_spill_backend.asm
+/pruebas/prueba_spill_backend.bin

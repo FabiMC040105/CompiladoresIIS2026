@@ -1511,6 +1511,7 @@ static void mostrar_uso(FILE *f)
         "  --codegen-ir    Genera ensamblador utilizando el backend IR.\n"
         "  --spill         Activa spilling AST y la fase de spilling IR.\n"
         "  --spill-ir      Activa solamente spilling IR.\n"
+        "  --spill-mapa    Muestra el coloreo final %%tN -> x4-x12.\n"
         "  --renombrar-ir  Renombra definiciones y temporales del IR.\n"
         "  --reordenar-ir  Reordena instrucciones según dependencias.\n"
         "  --opt-ir        Activa las cinco optimizaciones del IR.\n"
@@ -1581,6 +1582,9 @@ int main(int argc, char *argv[])
     int opcion_codegen_ir = 0;
     // Permite activar el spilling del backend AST.
     int opcion_spill = 0;
+
+    // Muestra la asignacion final obtenida por coloreo.
+    int opcion_spill_mapa = 0;
     // Guarda las fases de optimización solicitadas para IR.
     unsigned fases_ir = 0;
 
@@ -1627,6 +1631,13 @@ int main(int argc, char *argv[])
         // Activa solamente la fase de spilling del IR.
         else if (strcmp(argv[i], "--spill-ir") == 0)
             fases_ir |= OPT_IR_SPILL;
+
+        // Ejecuta spilling y muestra el mapa final temporal -> registro.
+        else if (strcmp(argv[i], "--spill-mapa") == 0)
+        {
+            fases_ir |= OPT_IR_SPILL;
+            opcion_spill_mapa = 1;
+        }
         // Renombra las definiciones y temporales del IR.
         else if (strcmp(argv[i], "--renombrar-ir") == 0)
             fases_ir |= OPT_IR_RENOMBRAR;
@@ -1932,6 +1943,35 @@ int main(int argc, char *argv[])
 
                     // Mostramos los resultados de las fases ejecutadas.
                     opt_ir_imprimir(&estadisticas_opt, stdout);
+
+                    /*
+                     * El mapa se calcula despues del spilling.
+                     * En este punto el grafo debe ser completamente
+                     * coloreable con x4-x12.
+                     */
+                    if (opcion_spill_mapa)
+                    {
+                        AsignacionRegistros mapa_spill;
+
+                        ar_init(&mapa_spill);
+
+                        if (!opt_ir_asignacion_para_codegen_ir(
+                                &programa_ir,
+                                9,
+                                4,
+                                &mapa_spill))
+                        {
+                            fprintf(stderr,
+                                    "Error: no se pudo obtener el mapa final de registros.\n");
+
+                            ar_free(&mapa_spill);
+                            ir_free(&programa_ir);
+                            goto error_compilacion;
+                        }
+
+                        ar_imprimir(&mapa_spill, stdout);
+                        ar_free(&mapa_spill);
+                    }
                 }
 
                 /* Envia la IR al IDE entre marcadores. */

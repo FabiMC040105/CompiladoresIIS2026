@@ -426,3 +426,26 @@ test-spill-obligatorio: all
 test-spill-defensa: test-grafo-spill test-spill test-spill-obligatorio
 	@echo ""
 	@echo "Spilling: grafo, coloreo, transformacion y 3 pruebas E2E superadas."
+
+.PHONY: test-spill-completo
+
+test-spill-completo: \
+        test-grafo-spill \
+        test-spill \
+        test-opt-ir \
+        test-codegen-ir-backend \
+        test-spill-obligatorio
+	@echo ""
+	@echo "=================================================="
+	@echo "SPILLING REGISTER: VALIDACION COMPLETA SUPERADA"
+	@echo "=================================================="
+	@echo "PASS: liveness"
+	@echo "PASS: grafo de interferencia"
+	@echo "PASS: coloreo"
+	@echo "PASS: seleccion de spill"
+	@echo "PASS: STORE/LOAD"
+	@echo "PASS: recoloreo"
+	@echo "PASS: asignacion final x4-x12"
+	@echo "PASS: integracion con optimizaciones IR"
+	@echo "PASS: backend IR"
+	@echo "PASS: 3 programas obligatorios"
