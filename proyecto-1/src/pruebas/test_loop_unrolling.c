@@ -195,6 +195,8 @@ int main(void)
     test_equivalent(1, 0, 4, 0);    /* Solo una iteracion */
     test_equivalent(6, 0, 2, 1);    /* Factor 2 y limite constante */
     test_equivalent(5, 1, 4, 0);    /* Limite en variable, queda sobrante */
+    test_equivalent(12, 0, 4, 0);   /* Camino rápido: 3 grupos de 4 */
+    test_equivalent(1000, 0, 4, 0); /* Camino rápido: 250 grupos de 4 */
     test_equivalent(13, 0, 4, 0);   /* No es multiplo de 4 */
     test_equivalent(1000, 1, 8, 0); /* Muchas iteraciones */
     test_unsafe_and_heuristic();    /* Casos que no quiero modificar */

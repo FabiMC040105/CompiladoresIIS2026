@@ -282,19 +282,78 @@ static void free_renames(TempRename *map, size_t n)
     free(map);
 }
 
+/* Camino rápido: únicamente para i=0; i<N; i=i+1, N literal y múltiplo
+   del factor. En ese caso sólo hace falta comprobar el límite al comienzo
+   de cada grupo; no hay iteraciones sobrantes ni saltos dentro del cuerpo. */
+static int can_group_without_checks(const IRProgram *p,
+                                    const LoopMatch *loop, unsigned factor)
+{
+    if (loop->condition_jump <= loop->start + 1 || factor < 2) return 0;
+    const IRInstruction *cmp = &p->instructions[loop->condition_jump - 1];
+    const IRInstruction *br = &p->instructions[loop->condition_jump];
+    if (cmp->op != IR_LT || !eq(cmp->result, br->arg1) ||
+        !cmp->arg1 || !cmp->arg2) return 0;
+
+    char *end = NULL;
+    errno = 0;
+    long bound = strtol(cmp->arg2, &end, 10);
+    if (errno || end == cmp->arg2 || *end ||
+        bound < (long)factor || bound > INT32_MAX ||
+        bound % (long)factor) return 0;
+
+    const char *counter = cmp->arg1;
+    int initialized = 0;
+    for (size_t j = loop->start; j > 0;) {
+        const IRInstruction *v = &p->instructions[--j];
+        if (v->op == IR_LABEL || v->op == IR_FUNC_BEGIN ||
+            v->op == IR_GOTO || v->op == IR_IF_TRUE ||
+            v->op == IR_IF_FALSE) break;
+        if (is_pure_assignment(v->op) && eq(v->result, counter)) {
+            initialized = v->op == IR_COPY && eq(v->arg1, "0");
+            break;
+        }
+    }
+    if (!initialized) return 0;
+
+    /* No aceptar entradas alternativas al encabezado. */
+    const char *header = p->instructions[loop->start].result;
+    for (size_t j = 0; j < p->count; ++j) {
+        const IRInstruction *v = &p->instructions[j];
+        if (j == loop->latch) continue;
+        if ((v->op == IR_GOTO || v->op == IR_IF_TRUE ||
+             v->op == IR_IF_FALSE) && eq(v->result, header)) return 0;
+    }
+
+    /* El cuerpo debe actualizar el contador exactamente una vez,
+       mediante suma de uno seguida de una copia, y sin otras escrituras. */
+    int increments = 0;
+    for (size_t j = loop->start + 1; j < loop->latch; ++j) {
+        const IRInstruction *v = &p->instructions[j];
+        if (!is_pure_assignment(v->op) || !eq(v->result, counter)) continue;
+        if (j <= loop->condition_jump + 1 || v->op != IR_COPY) return 0;
+        const IRInstruction *prev = &p->instructions[j-1];
+        if (prev->op != IR_ADD || !eq(prev->result, v->arg1) ||
+            !((eq(prev->arg1, counter) && eq(prev->arg2, "1")) ||
+              (eq(prev->arg2, counter) && eq(prev->arg1, "1")))) return 0;
+        ++increments;
+    }
+    return increments == 1;
+}
+
 /* Copio una iteracion completa del ciclo
    La primera mantiene sus temporales y las otras crean nombres nuevos
    El orden de las instrucciones se conserva */
 static int emit_iteration(const IRProgram *input, IRProgram *output,
-                          const LoopMatch *loop, int first)
+                          const LoopMatch *loop, int first, int skip_condition)
 {
     TempRename *map = NULL;
     size_t map_count = 0, capacity = loop->latch - loop->start;
     size_t i;
+    size_t begin = skip_condition ? loop->condition_jump + 1 : loop->start + 1;
     if (!first) {
         map = calloc(capacity, sizeof(*map));
         if (!map) return 0;
-        for (i = loop->start + 1; i < loop->latch; ++i) {
+        for (i = begin; i < loop->latch; ++i) {
             const IRInstruction *v = &input->instructions[i];
             if (is_pure_assignment(v->op) && is_temp(v->result)) {
                 map[map_count].old_name = v->result;
@@ -307,7 +366,7 @@ static int emit_iteration(const IRProgram *input, IRProgram *output,
             }
         }
     }
-    for (i = loop->start + 1; i < loop->latch; ++i) {
+    for (i = begin; i < loop->latch; ++i) {
         const IRInstruction *v = &input->instructions[i];
         const char *a = first ? v->arg1 : renamed(v->arg1, map, map_count);
         const char *b = first ? v->arg2 : renamed(v->arg2, map, map_count);
@@ -376,9 +435,11 @@ int loop_unroll(const IRProgram *input, IRProgram *output,
         if (input->instructions[i].op == IR_LABEL &&
             find_simple_loop(input, cfg, i, max_body, max_extra, factor, &match)) {
             unsigned rep;
+            int grouped = can_group_without_checks(input, &match, factor);
             if (!raw_copy(&generated, &input->instructions[i])) goto fail;
             for (rep = 0; rep < factor; ++rep)
-                if (!emit_iteration(input, &generated, &match, rep == 0)) goto fail;
+                if (!emit_iteration(input, &generated, &match, rep == 0,
+                                    grouped && rep > 0)) goto fail;
             if (!raw_copy(&generated, &input->instructions[match.latch])) goto fail;
             ++record.loops_unrolled;
             i = match.latch + 1;
