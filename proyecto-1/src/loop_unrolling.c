@@ -190,23 +190,6 @@ static int find_simple_loop(const IRProgram *p, const BasicBlockCFG *cfg,
     if (!has_backedge(cfg, start, latch)) return 0;
 
 
-    /*
-     * Heuristica conservadora de rentabilidad:
-     * no expandir ciclos cuyo limite no es un literal numerico.
-     * Evita crecimiento excesivo de temporales y llamadas.
-     */
-    {
-        const IRInstruction *cmp = &p->instructions[branch - 1];
-        char *end = NULL;
-
-        if (!cmp->arg2) return 0;
-        errno = 0;
-        (void)strtol(cmp->arg2, &end, 10);
-
-        if (errno || end == cmp->arg2 || *end != '\0')
-            return 0;
-    }
-
     /* No expando los ciclos cortos que la heuristica reconoce */
     if (skip_short_constant_loop(p, start, branch, factor))
         return 0;
@@ -433,13 +416,14 @@ int loop_unroll(const IRProgram *input, IRProgram *output,
     for (i = 0; i < input->count;) {
         LoopMatch match;
         if (input->instructions[i].op == IR_LABEL &&
-            find_simple_loop(input, cfg, i, max_body, max_extra, factor, &match) &&
-            can_group_without_checks(input, &match, factor)) {
+            find_simple_loop(input, cfg, i, max_body, max_extra, factor, &match)) {
             unsigned rep;
+            int fast_path = can_group_without_checks(input, &match, factor);
+
             if (!raw_copy(&generated, &input->instructions[i])) goto fail;
             for (rep = 0; rep < factor; ++rep)
                 if (!emit_iteration(input, &generated, &match, rep == 0,
-                                    rep > 0)) goto fail;
+                                    fast_path && rep > 0)) goto fail;
             if (!raw_copy(&generated, &input->instructions[match.latch])) goto fail;
             ++record.loops_unrolled;
             i = match.latch + 1;

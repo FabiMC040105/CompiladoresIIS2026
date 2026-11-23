@@ -141,9 +141,7 @@ static void test_equivalent(long n, int variable_bound, unsigned factor, int sho
     assert(run_program(&original) == expected);
     assert(loop_unroll(&original, &optimized, &cfg, &stats) == 1);
     /* Los ciclos constantes de 0 o 1 vueltas se dejan como estaban */
-    int should_unroll = !variable_bound &&
-                        n >= (long)factor * 3L &&
-                        n % (long)factor == 0;
+    int should_unroll = variable_bound || n >= (long)factor;
 
     assert(stats.loops_found == 1);
     assert(stats.loops_unrolled == (size_t)should_unroll);
