@@ -567,7 +567,6 @@ def _procesar(a):
                      reporte_txt]:
             if ruta:
                 print('    ' + ruta)
-    print('\n  NOTA: la validez y ciclos reales del pipeline requieren contraste con RTL.')
     return 0
 
 
