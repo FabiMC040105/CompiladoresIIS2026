@@ -156,6 +156,26 @@ fin:
     return ok;
 }
 
+/*
+ * Conserva la referencia al nodo AST que dio origen a la
+ * instruccion. El backend IR utiliza este dato para resolver
+ * correctamente variables locales y parametros dentro de su
+ * ambito original.
+ */
+static void asociar_origen_ultima(
+    IRProgram *programa,
+    const NodoAST *origen
+)
+{
+    if (programa == NULL ||
+        programa->count == 0)
+        return;
+
+    programa->instructions[
+        programa->count - 1
+    ].nodo_origen = origen;
+}
+
 static void liberar_reloads(char **reloads)
 {
     size_t i;
@@ -304,6 +324,15 @@ static int reescribir_spills(
                 goto error;
             }
 
+            /*
+             * El reload pertenece semanticamente a la misma
+             * expresion que utilizaba el temporal derramado.
+             */
+            asociar_origen_ultima(
+                &nuevo,
+                original->nodo_origen
+            );
+
             destino =
                 campo_mutable(
                     &modificada,
@@ -341,6 +370,15 @@ static int reescribir_spills(
             liberar_reloads(reloads);
             goto error;
         }
+
+        /*
+         * ir_emit_ex() copia los campos textuales pero no conoce
+         * el AST. Restauramos explicitamente el origen original.
+         */
+        asociar_origen_ultima(
+            &nuevo,
+            original->nodo_origen
+        );
 
         liberar_reloads(reloads);
 
@@ -398,6 +436,15 @@ static int reescribir_spills(
                     original->source_line
                 ))
                 goto error;
+
+            /*
+             * El store pertenece a la misma definicion que produjo
+             * el temporal seleccionado para spilling.
+             */
+            asociar_origen_ultima(
+                &nuevo,
+                original->nodo_origen
+            );
 
             resultado->stores++;
         }
