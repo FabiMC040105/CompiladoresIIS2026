@@ -364,7 +364,7 @@ $(TEST_DIR)/prueba_integracion_opt_ir: pruebas/prueba_integracion_opt_ir.c $(IR_
 test-opt-ir: $(TEST_DIR)/prueba_integracion_opt_ir
 	./$(TEST_DIR)/prueba_integracion_opt_ir
 
-# Tests heredados de persona 3, ademas de spilling y del flujo integrado.
+# Pruebas de optimizaciones IR, spilling y flujo integrado.
 test-opt-modulos: test-opt-ir test-spill test-grafo-spill
 
 $(TEST_DIR)/prueba_renombramiento: prueba_renombramiento.c \
@@ -390,3 +390,15 @@ test-dce-ir: $(DCE_REGRESIONES)
 
 .PHONY: test-renombramiento test-reordenamiento test-dce-ir
 test-opt-modulos: test-renombramiento test-reordenamiento test-dce-ir
+
+# ---------------------------------------------------------------
+# Pruebas obligatorias de spilling register
+# ---------------------------------------------------------------
+.PHONY: test-spill-obligatorio test-spill-defensa
+
+test-spill-obligatorio: all
+	./pruebas/probar_spilling_obligatorio.sh
+
+test-spill-defensa: test-grafo-spill test-spill test-spill-obligatorio
+	@echo ""
+	@echo "Spilling: grafo, coloreo, transformacion y 3 pruebas E2E superadas."
