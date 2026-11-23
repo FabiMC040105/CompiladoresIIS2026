@@ -115,7 +115,15 @@ static int emit_copy(IRProgram *out, const IRInstruction *v,
                      const char *a, const char *b, const char *r,
                      const char *extra)
 {
-    return ir_emit_ex(out, v->op, a, b, r, extra, v->source_line);
+    /* Conservamos la información del AST al copiar la instrucción.
+       El backend necesita este nodo para identificar correctamente
+       las variables locales y sus ámbitos. */
+    if (!ir_emit_ex(out, v->op, a, b, r, extra, v->source_line))
+        return 0;
+
+    out->instructions[out->count - 1].nodo_origen = v->nodo_origen;
+
+    return 1;
 }
 
 /* Esta copia queda igual, no hace renombramiento */

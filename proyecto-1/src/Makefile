@@ -377,7 +377,7 @@ test-spill: $(TEST_DIR)/prueba_spill_transform
 IR_OPT_TEST_SOURCES := ir.c ir_ast.c ast.c basic_blocks.c liveness.c \
     dead_code_elimination.c dependencias.c dag.c renombramiento.c \
     reordenamiento.c grafo_interferencia.c asignacion_registros.c \
-    spill_transform.c optimizaciones_ir.c
+    spill_transform.c optimizaciones_ir.c loop_unrolling.c
 
 $(TEST_DIR)/prueba_integracion_opt_ir: pruebas/prueba_integracion_opt_ir.c $(IR_OPT_TEST_SOURCES) $(HEADERS) | $(TEST_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -I. -o $@ pruebas/prueba_integracion_opt_ir.c \

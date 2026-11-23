@@ -24,8 +24,10 @@ static int opt_ir_clonar(const IRProgram *origen, IRProgram *destino)
     return 1;
 }
 
-int opt_ir_aplicar(IRProgram *programa, unsigned fases, int colores,
-                  int registro_base, OptIREstadisticas *estadisticas)
+int opt_ir_aplicar_config(IRProgram *programa, unsigned fases,
+                          int colores, int registro_base,
+                          unsigned factor_unroll,
+                          OptIREstadisticas *estadisticas)
 {
     IRProgram trabajo;
     OptIREstadisticas s = {0};
@@ -33,6 +35,8 @@ int opt_ir_aplicar(IRProgram *programa, unsigned fases, int colores,
     if (!programa || !estadisticas ||
         (programa->count && !programa->instructions) ||
         (fases & ~OPT_IR_TODAS) ||
+        ((fases & OPT_IR_UNROLL) &&
+         (factor_unroll < 2 || factor_unroll > 16)) ||
         ((fases & OPT_IR_SPILL) && (colores <= 0 || registro_base < 0)))
         return 0;
     s.instrucciones_antes = programa->count;
@@ -42,6 +46,27 @@ int opt_ir_aplicar(IRProgram *programa, unsigned fases, int colores,
         return 1;
     }
     if (!opt_ir_clonar(programa, &trabajo)) return 0;
+
+    /* Desenrollamos los ciclos antes de aplicar las demás fases.
+       De esta forma DCE, renombramiento y reordenamiento trabajan
+       sobre las instrucciones que realmente ejecutará el backend. */
+    if (fases & OPT_IR_UNROLL) {
+        IRProgram desenrollado;
+        LoopUnrollConfig config = {0};
+
+        ir_init(&desenrollado);
+        config.factor = factor_unroll;
+
+        if (!loop_unroll(&trabajo, &desenrollado,
+                         &config, &s.unrolling)) {
+            ir_free(&desenrollado);
+            goto fallo;
+        }
+
+        ir_free(&trabajo);
+        trabajo = desenrollado;
+        s.fases_ejecutadas |= OPT_IR_UNROLL;
+    }
 
     /* DCE elimina computos muertos antes de analizar dependencias y presion. */
     if (fases & OPT_IR_DCE) {
@@ -80,6 +105,12 @@ void opt_ir_imprimir(const OptIREstadisticas *s, FILE *salida)
     if (!s || !salida) return;
     fprintf(salida, "[OPT IR] instrucciones: %zu -> %zu\n",
             s->instrucciones_antes, s->instrucciones_despues);
+    if (s->fases_ejecutadas & OPT_IR_UNROLL)
+        fprintf(salida,
+                "[UNROLL IR] encontrados=%zu desenrollados=%zu omitidos=%zu\n",
+                s->unrolling.loops_found,
+                s->unrolling.loops_unrolled,
+                s->unrolling.loops_skipped);
     if (s->fases_ejecutadas & OPT_IR_DCE)
         fprintf(salida, "[OPT IR] DCE: eliminadas=%zu pasadas=%zu\n",
                 s->dce.eliminadas, s->dce.pasadas);
@@ -100,4 +131,13 @@ int opt_ir_asignacion_para_codegen_ir(const IRProgram *programa, int colores,
                                      int registro_base, AsignacionRegistros *salida)
 {
     return spill_asignacion_final(programa, colores, registro_base, salida);
+}
+
+/* Esta función conserva la compatibilidad con el código anterior.
+   Si no se indica un factor, utilizamos 2 por defecto. */
+int opt_ir_aplicar(IRProgram *programa, unsigned fases, int colores,
+                  int registro_base, OptIREstadisticas *estadisticas)
+{
+    return opt_ir_aplicar_config(programa, fases, colores,
+                                registro_base, 2, estadisticas);
 }

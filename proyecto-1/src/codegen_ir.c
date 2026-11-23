@@ -12,6 +12,7 @@
 #include "codegen_ir.h"
 
 #include "memoria.h"
+#include "spill_transform.h"
 
 #include <errno.h>
 
@@ -60,6 +61,11 @@ typedef struct {
 
 
     uint32_t inicio_temporales;
+
+    /* Memoria reservada para los slots de Spilling IR. */
+    uint32_t inicio_spilling;
+    size_t cantidad_slots_spilling;
+    uint32_t limite_datos_ir;
 
     /*
 
@@ -623,6 +629,30 @@ static int preparar(EstadoIR *e, const IRProgram *p)
 
     }
 
+    /* Identificamos los slots utilizados por Spilling IR. */
+    for (size_t j = 0; j < p->count; ++j) {
+        const IRInstruction *i = &p->instructions[j];
+        const char *indice = NULL;
+        int32_t slot;
+
+        if (i->op == IR_ARRAY_LOAD && i->arg1 &&
+            strcmp(i->arg1, SPILL_IR_AREA) == 0)
+            indice = i->arg2;
+
+        if (i->op == IR_ARRAY_STORE && i->result &&
+            strcmp(i->result, SPILL_IR_AREA) == 0)
+            indice = i->arg1;
+
+        if (!indice)
+            continue;
+
+        if (!numero(indice, &slot) || slot < 0)
+            return 0;
+
+        if ((size_t)slot + 1 > e->cantidad_slots_spilling)
+            e->cantidad_slots_spilling = (size_t)slot + 1;
+    }
+
     e->stats.temporales = e->cantidad_temporales;
 
 
@@ -661,9 +691,23 @@ static int preparar(EstadoIR *e, const IRProgram *p)
 
 
 
-    return fin + e->cantidad_temporales * 4u
+    {
+        uint64_t inicio =
+            (uint64_t)fin +
+            (uint64_t)e->cantidad_temporales * TAMANO_PALABRA;
 
-           < MEMORIA_TOTAL_BYTES;
+        uint64_t limite =
+            inicio +
+            (uint64_t)e->cantidad_slots_spilling * TAMANO_PALABRA;
+
+        if (limite >= MEMORIA_TOTAL_BYTES)
+            return 0;
+
+        e->inicio_spilling = (uint32_t)inicio;
+        e->limite_datos_ir = (uint32_t)limite;
+    }
+
+    return 1;
 
 
 
@@ -835,7 +879,7 @@ static int validar_funciones(
 
                         cabecera,
 
-                        e->config->original.fin_globales))
+                        e->limite_datos_ir))
 
                 {
 
@@ -1340,6 +1384,38 @@ static int direccion_indexada_ir(EstadoIR *e, const IRInstruction *i,
 }
 
 /* Traduce lectura/escritura; IR almacena la segunda dimension en extra. */
+
+/* Traduce los accesos internos a la memoria de Spilling. */
+static int acceso_spilling_ir(
+    EstadoIR *e, const IRInstruction *i, int escritura)
+{
+    const char *indice = escritura ? i->arg1 : i->arg2;
+    const char *valor = escritura ? i->arg2 : i->result;
+    int32_t slot;
+    uint64_t direccion;
+
+    if (!indice || !valor || !numero(indice, &slot) ||
+        slot < 0 || (size_t)slot >= e->cantidad_slots_spilling)
+        return fallo(e, i, "slot de Spilling invalido");
+
+    direccion = (uint64_t)e->inicio_spilling +
+                (uint64_t)slot * TAMANO_PALABRA;
+
+    if (direccion > MEMORIA_TOTAL_BYTES - TAMANO_PALABRA)
+        return fallo(e, i, "direccion de Spilling invalida");
+
+    /* Conservamos la dirección en x11. */
+    if (!constante(e, 11, (int32_t)direccion))
+        return 0;
+
+    if (escritura)
+        return cargar(e, valor, 4) &&
+               emitir(e, "LSU", "STORE x4, 0(x11)");
+
+    return emitir(e, "LSU", "LOAD x4, 0(x11)") &&
+           guardar(e, valor, 4);
+}
+
 static int acceso_indexado_ir(EstadoIR *e, const IRInstruction *i,
                               int matriz, int escritura)
 {
@@ -1755,8 +1831,13 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
         return base_indexada_ir(e, i, i->result, i->op == IR_MATRIX_DECL);
 
     case IR_ARRAY_LOAD:
+        if (i->arg1 && strcmp(i->arg1, SPILL_IR_AREA) == 0)
+            return acceso_spilling_ir(e, i, 0);
         return acceso_indexado_ir(e, i, 0, 0);
+
     case IR_ARRAY_STORE:
+        if (i->result && strcmp(i->result, SPILL_IR_AREA) == 0)
+            return acceso_spilling_ir(e, i, 1);
         return acceso_indexado_ir(e, i, 0, 1);
     case IR_MATRIX_LOAD:
         return acceso_indexado_ir(e, i, 1, 0);
