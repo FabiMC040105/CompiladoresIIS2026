@@ -20,7 +20,7 @@ ALU: ADDI x14, x14, 0
 ALU: NOP
 ALU: NOP
 ALU: ADD x15, x14, x0
-BRU: JMP 1296
+BRU: JMP 3792
 func_factorial:
 ALU: ADDI x2, x0, 0
 ALU: ADDI x14, x14, -4
@@ -30,47 +30,93 @@ LSU: STORE x15, 0(x14)
 ALU: ADD x15, x14, x0
 ALU: ADDI x14, x14, -8
 ALU: ADDI x4, x0, 1
+ALU: ADDI x13, x15, -4
 ALU: NOP
 ALU: NOP
-LSU: STORE x4, -4(x15)
+LSU: STORE x4, 0(x13)
+ALU: ADDI x4, x0, 1
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: ADDI x13, x15, 8
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 0 | LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: ADDI x6, x0, 0
+ALU: NOP
+BRU: BEQ x4, x5, 32
+BRU: JMP 32
+__ir_cmp_true_0:
+ALU: ADDI x6, x0, 1
+__ir_cmp_end_1:
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+BRU: BEQ x4, x0, 96
 ALU: ADDI x4, x0, 1
 ALU: NOP
 ALU: NOP
-LSU: STORE x4, -8(x15)
-ALU: ADDI x5, x0, 0 | LSU: LOAD x4, 8(x15)
+ALU: ADD x2, x4, x0
+BRU: JMP 2992
+L_ir_0:
+L_ir_1:
+ALU: ADDI x13, x15, -8
 ALU: NOP
 ALU: NOP
-ALU: NOP
-BRU: BNE x4, x5, 96
-ALU: ADDI x4, x0, 1
-ALU: NOP
-ALU: NOP
-ALU: ADD x2, x0, x4
-BRU: JMP 784
-fin_if_0:
-inicio_while_1:
-LSU: LOAD x4, -8(x15)
-LSU: LOAD x5, 8(x15)
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, 8
 ALU: NOP
 ALU: NOP
-ALU: SLT x4, x5, x4
+ALU: ADDI x6, x0, 0 | LSU: LOAD x5, 0(x13)
 ALU: NOP
 ALU: NOP
-BRU: BNE x4, x0, 576
-LSU: LOAD x4, -4(x15)
-ALU: ADDI x6, x0, 0 | LSU: LOAD x5, -8(x15)
+BRU: BLE x4, x5, 32
+BRU: JMP 32
+__ir_cmp_true_2:
+ALU: ADDI x6, x0, 1
+__ir_cmp_end_3:
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+BRU: BNE x4, x0, 32
+BRU: JMP 2464
+__branch_largo_fin_0:
+ALU: ADDI x13, x15, -4
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+ALU: ADDI x6, x0, 0 | LSU: LOAD x5, 0(x13)
 ALU: NOP
 ALU: ADDI x7, x0, 0
 ALU: ADDI x8, x0, 1 | BRU: BGE x4, x0, 64
 ALU: NOP
 ALU: SUB x4, x0, x4
 ALU: ADDI x7, x7, 1
-mul_izq_positivo_3:
+mul_izq_positivo_0:
 BRU: BGE x5, x0, 48
 ALU: SUB x5, x0, x5
 ALU: ADDI x7, x7, 1
-mul_der_positivo_4:
-mul_bucle_5:
+mul_der_positivo_1:
+mul_bucle_2:
 ALU: NOP
 BRU: BEQ x5, x0, 144
 ALU: AND x9, x5, x8
@@ -78,31 +124,154 @@ ALU: NOP
 ALU: NOP
 BRU: BEQ x9, x0, 32
 ALU: ADD x6, x6, x4
-mul_sin_suma_6:
+mul_sin_suma_3:
 ALU: SLLI x4, x4, 1
 ALU: SRLI x5, x5, 1
 BRU: JMP -144
-mul_fin_bucle_7:
+mul_fin_bucle_4:
 BRU: BNE x7, x8, 32
 ALU: SUB x6, x0, x6
-mul_fin_signo_8:
+mul_fin_signo_5:
 ALU: NOP
 ALU: NOP
-LSU: STORE x6, -4(x15)
-ALU: ADDI x5, x0, 1 | LSU: LOAD x4, -8(x15)
+ALU: ADD x6, x6, x0
+ALU: ADDI x13, x0, 8
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 1 | LSU: LOAD x4, 0(x13)
 ALU: NOP
 ALU: NOP
 ALU: NOP
-ALU: ADD x4, x4, x5
+ALU: ADD x6, x4, x5
+ALU: ADDI x13, x0, 12
 ALU: NOP
 ALU: NOP
-LSU: STORE x4, -8(x15) | BRU: JMP -656
-ALU: NOP
-fin_while_2:
-LSU: LOAD x4, -4(x15)
+LSU: STORE x6, 0(x13)
+ALU: ADDI x13, x0, 8
 ALU: NOP
 ALU: NOP
-ALU: ADD x2, x0, x4
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: ADDI x13, x0, 12
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, 8
+ALU: NOP
+ALU: NOP
+ALU: ADDI x6, x0, 0 | LSU: LOAD x5, 0(x13)
+ALU: NOP
+ALU: NOP
+BRU: BLE x4, x5, 32
+BRU: JMP 32
+__ir_cmp_true_4:
+ALU: ADDI x6, x0, 1
+__ir_cmp_end_5:
+ALU: ADDI x13, x0, 16
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: ADDI x13, x0, 16
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+BRU: BEQ x4, x0, 1056
+ALU: ADDI x13, x15, -4
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+ALU: ADDI x6, x0, 0 | LSU: LOAD x5, 0(x13)
+ALU: NOP
+ALU: ADDI x7, x0, 0
+ALU: ADDI x8, x0, 1 | BRU: BGE x4, x0, 64
+ALU: NOP
+ALU: SUB x4, x0, x4
+ALU: ADDI x7, x7, 1
+mul_izq_positivo_6:
+BRU: BGE x5, x0, 48
+ALU: SUB x5, x0, x5
+ALU: ADDI x7, x7, 1
+mul_der_positivo_7:
+mul_bucle_8:
+ALU: NOP
+BRU: BEQ x5, x0, 144
+ALU: AND x9, x5, x8
+ALU: NOP
+ALU: NOP
+BRU: BEQ x9, x0, 32
+ALU: ADD x6, x6, x4
+mul_sin_suma_9:
+ALU: SLLI x4, x4, 1
+ALU: SRLI x5, x5, 1
+BRU: JMP -144
+mul_fin_bucle_10:
+BRU: BNE x7, x8, 32
+ALU: SUB x6, x0, x6
+mul_fin_signo_11:
+ALU: NOP
+ALU: NOP
+ALU: ADD x6, x6, x0
+ALU: ADDI x13, x0, 20
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+ALU: ADDI x5, x0, 1 | LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: NOP
+ALU: ADD x6, x4, x5
+ALU: ADDI x13, x0, 24
+ALU: NOP
+ALU: NOP
+LSU: STORE x6, 0(x13)
+ALU: ADDI x13, x0, 20
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+ALU: ADDI x13, x0, 24
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13) | BRU: JMP -2816
+ALU: NOP
+L_ir_2:
+ALU: ADDI x13, x15, -4
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: NOP
+ALU: NOP
+ALU: ADD x2, x4, x0
 BRU: JMP 16
 ret_factorial:
 ALU: ADD x14, x15, x0
@@ -114,61 +283,20 @@ ALU: ADD x1, x13, x0
 ALU: NOP
 principal:
 ALU: ADD x15, x14, x0
-ALU: ADDI x13, x14, -8
-ALU: ADDI x3, x0, 0
-ALU: NOP
-ALU: NOP
-ALU: SLLI x3, x3, 8
-ALU: NOP
-ALU: NOP
-ALU: ADDI x3, x3, 0
-ALU: NOP
-ALU: NOP
-ALU: SLLI x3, x3, 8
-ALU: NOP
-ALU: NOP
-ALU: ADDI x3, x3, 128
-ALU: NOP
-ALU: NOP
-ALU: SLLI x3, x3, 8
-ALU: NOP
-ALU: NOP
-ALU: ADDI x3, x3, 0
-ALU: NOP
-ALU: NOP
-BRU: BGE x13, x3, 32
-BRU: JMP 1936
-pila_ok_9:
 ALU: ADDI x14, x14, -8
 ALU: ADDI x4, x0, 5
+ALU: ADDI x13, x15, -4
 ALU: NOP
 ALU: NOP
-LSU: STORE x4, -4(x15)
-ALU: ADDI x13, x14, -56
-ALU: ADDI x3, x0, 0
+LSU: STORE x4, 0(x13)
+ALU: ADDI x13, x15, -4
 ALU: NOP
 ALU: NOP
-ALU: SLLI x3, x3, 8
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x0, 28
 ALU: NOP
 ALU: NOP
-ALU: ADDI x3, x3, 0
-ALU: NOP
-ALU: NOP
-ALU: SLLI x3, x3, 8
-ALU: NOP
-ALU: NOP
-ALU: ADDI x3, x3, 128
-ALU: NOP
-ALU: NOP
-ALU: SLLI x3, x3, 8
-ALU: NOP
-ALU: NOP
-ALU: ADDI x3, x3, 0
-ALU: NOP
-ALU: NOP
-BRU: BGE x13, x3, 32
-BRU: JMP 1472
-pila_ok_10:
+LSU: STORE x4, 0(x13)
 ALU: ADDI x14, x14, -4
 ALU: NOP
 ALU: NOP
@@ -205,7 +333,82 @@ ALU: ADDI x14, x14, -4
 ALU: NOP
 ALU: NOP
 LSU: STORE x12, 0(x14)
-LSU: LOAD x4, -4(x15)
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 8
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 12
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 16
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 20
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 24
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 28
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 32
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x14, x14, -4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x14)
+ALU: ADDI x13, x0, 28
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
 ALU: ADDI x14, x14, -4
 ALU: NOP
 ALU: NOP
@@ -214,12 +417,66 @@ ALU: ADDI x14, x14, -4
 ALU: ADDI x3, x1, 80
 ALU: NOP
 ALU: NOP
-LSU: STORE x3, 0(x14) | BRU: JMP -2864
+LSU: STORE x3, 0(x14) | BRU: JMP -5936
 ALU: NOP
-ret_call_11:
+ir_retorno_0:
 ALU: ADDI x14, x14, 4
 ALU: NOP
 ALU: NOP
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 32
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 28
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 24
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 20
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 16
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 12
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 8
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 4
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
+LSU: LOAD x4, 0(x14)
+ALU: ADDI x14, x14, 4
+ALU: ADDI x13, x0, 0
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
 LSU: LOAD x12, 0(x14)
 ALU: ADDI x14, x14, 4
 ALU: NOP
@@ -254,13 +511,19 @@ ALU: NOP
 ALU: NOP
 LSU: LOAD x4, 0(x14)
 ALU: ADDI x14, x14, 4
-ALU: ADD x4, x0, x2
+ALU: ADDI x13, x0, 32
 ALU: NOP
 ALU: NOP
-LSU: STORE x4, -8(x15)
+LSU: STORE x2, 0(x13)
+ALU: ADDI x13, x0, 32
+ALU: NOP
+ALU: NOP
+LSU: LOAD x4, 0(x13)
+ALU: ADDI x13, x15, -8
+ALU: NOP
+ALU: NOP
+LSU: STORE x4, 0(x13)
 ALU: ADD x14, x15, x0
 BRU: JMP 16
 fin_programa:
-BRU: JMP 0
-error_pila:
 BRU: JMP 0
