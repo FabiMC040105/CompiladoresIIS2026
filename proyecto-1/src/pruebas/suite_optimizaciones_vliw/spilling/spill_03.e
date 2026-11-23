@@ -1,3 +1,5 @@
+entero resultado = 0 :)
+
 defina entero suma14(
     entero a1, entero a2, entero a3, entero a4,
     entero a5, entero a6, entero a7, entero a8,
@@ -9,7 +11,7 @@ defina entero suma14(
 }:)
 
 defina vacio principal() {
-    entero resultado = suma14(
+    resultado = suma14(
         1 + 2,
         2 + 2,
         3 + 2,

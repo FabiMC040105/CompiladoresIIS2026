@@ -1,10 +1,14 @@
-defina entero calcular() {
-    entero a = 10 :)
-    entero b = a + 5 :)
-    entero c = 30 :)
-    devuelva c :)
+entero resultado = 0 :)
+entero efecto = 0 :)
+
+defina entero registrar(entero valor) {
+    efecto = efecto + valor :)
+    devuelva efecto :)
 } :)
 
 defina vacio principal() {
-    entero resultado = calcular() :)
+    entero muerto1 = 100 :)
+    registrar(5) :)
+    entero muerto2 = 200 :)
+    resultado = efecto :)
 } :)

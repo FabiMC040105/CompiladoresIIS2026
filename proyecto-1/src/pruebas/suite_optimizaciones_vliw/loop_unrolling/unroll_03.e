@@ -1,3 +1,5 @@
+entero resultado = 0 :)
+
 defina vacio principal() {
     entero i = 0 :)
     entero suma = 0 :)
@@ -6,4 +8,6 @@ defina vacio principal() {
         suma = suma + i :)
         i = i + 1 :)
     } :)
+
+    resultado = suma :)
 } :)

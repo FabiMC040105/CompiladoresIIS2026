@@ -447,18 +447,28 @@ static int cargar(EstadoIR *e,
 
     if (es_temporal(nombre)) {
 
-        if (!direccion_temporal(e, nombre, &dir))
+        const AsignacionTemporal *a = NULL;
 
+        if (e->config != NULL &&
+            e->config->asignacion_registros != NULL)
+            a = ar_buscar(e->config->asignacion_registros, nombre);
+
+        if (a != NULL && !a->es_spill &&
+            a->registro >= 4 && a->registro <= 12) {
+            if (reg == a->registro)
+                return 1;
+
+            return emitir(e, "ALU",
+                          "ADD x%d, x%d, x0",
+                          reg, a->registro);
+        }
+
+        if (!direccion_temporal(e, nombre, &dir))
             return 0;
 
-
-
         return constante(e, IR_DIR, (int32_t)dir) &&
-
                emitir(e, "LSU",
-
                       "LOAD x%d, 0(x%d)",
-
                       reg, IR_DIR);
 
     }
@@ -529,18 +539,28 @@ static int guardar(EstadoIR *e,
 
     if (es_temporal(nombre)) {
 
-        if (!direccion_temporal(e, nombre, &dir))
+        const AsignacionTemporal *a = NULL;
 
+        if (e->config != NULL &&
+            e->config->asignacion_registros != NULL)
+            a = ar_buscar(e->config->asignacion_registros, nombre);
+
+        if (a != NULL && !a->es_spill &&
+            a->registro >= 4 && a->registro <= 12) {
+            if (reg == a->registro)
+                return 1;
+
+            return emitir(e, "ALU",
+                          "ADD x%d, x%d, x0",
+                          a->registro, reg);
+        }
+
+        if (!direccion_temporal(e, nombre, &dir))
             return 0;
 
-
-
         return constante(e, IR_DIR, (int32_t)dir) &&
-
                emitir(e, "LSU",
-
                       "STORE x%d, 0(x%d)",
-
                       reg, IR_DIR);
 
     }
@@ -568,6 +588,45 @@ static int guardar(EstadoIR *e,
 }
 
 
+
+/* Devuelve el registro fisico asignado a un temporal o -1. */
+static int registro_temporal_mapeado(EstadoIR *e, const char *nombre)
+{
+    const AsignacionTemporal *a;
+
+    if (e == NULL || nombre == NULL || !es_temporal(nombre) ||
+        e->config == NULL || e->config->asignacion_registros == NULL)
+        return -1;
+
+    a = ar_buscar(e->config->asignacion_registros, nombre);
+
+    if (a == NULL || a->es_spill || a->registro < 4 || a->registro > 12)
+        return -1;
+
+    return a->registro;
+}
+
+/* Obtiene un operando sin copiar temporales coloreados. */
+static int operando_en_registro(EstadoIR *e, const char *nombre,
+                                int auxiliar, int *registro)
+{
+    int r;
+
+    if (e == NULL || nombre == NULL || registro == NULL)
+        return 0;
+
+    r = registro_temporal_mapeado(e, nombre);
+    if (r >= 0) {
+        *registro = r;
+        return 1;
+    }
+
+    if (!cargar(e, nombre, auxiliar))
+        return 0;
+
+    *registro = auxiliar;
+    return 1;
+}
 
 /* Recolectamos los temporales de todas las instrucciones, sin duplicados. */
 
@@ -1099,11 +1158,65 @@ static int etiqueta_auxiliar(EstadoIR *e, const char *prefijo,
  * BNE, BGE y BLE; las otras relaciones se obtienen intercambiando
  * los operandos. Nunca emitimos operadores inexistentes.
  */
-static int comparar_ir(EstadoIR *e, IROp op)
+static int preparar_binaria_directa(EstadoIR *e,
+                                    const char *arg1,
+                                    const char *arg2,
+                                    int destino,
+                                    int *reg1,
+                                    int *reg2)
+{
+    int r1, r2;
+
+    if (!e || !arg1 || !arg2 || !reg1 || !reg2 ||
+        destino < 4 || destino > 12)
+        return 0;
+
+    r1 = registro_temporal_mapeado(e, arg1);
+    r2 = registro_temporal_mapeado(e, arg2);
+
+    if (r1 >= 0 && r2 >= 0) {
+        *reg1 = r1;
+        *reg2 = r2;
+        return 1;
+    }
+
+    if (r1 >= 0) {
+        *reg1 = r1;
+        if (destino != r1) {
+            if (!cargar(e, arg2, destino)) return 0;
+            *reg2 = destino;
+        } else {
+            if (!cargar(e, arg2, 3)) return 0;
+            *reg2 = 3;
+        }
+        return 1;
+    }
+
+    if (r2 >= 0) {
+        *reg2 = r2;
+        if (destino != r2) {
+            if (!cargar(e, arg1, destino)) return 0;
+            *reg1 = destino;
+        } else {
+            if (!cargar(e, arg1, 3)) return 0;
+            *reg1 = 3;
+        }
+        return 1;
+    }
+
+    if (!cargar(e, arg1, destino) || !cargar(e, arg2, 3))
+        return 0;
+
+    *reg1 = destino;
+    *reg2 = 3;
+    return 1;
+}
+
+static int comparar_ir(EstadoIR *e, IROp op,
+                       int izq, int der, int destino)
 {
     char verdadero[80], fin[80];
     const char *salto = NULL;
-    int izq = IR_R1, der = IR_R2;
 
     if (!etiqueta_auxiliar(e, "cmp_true", verdadero, sizeof(verdadero)) ||
         !etiqueta_auxiliar(e, "cmp_end", fin, sizeof(fin)))
@@ -1114,55 +1227,29 @@ static int comparar_ir(EstadoIR *e, IROp op)
     case IR_NE: salto = "BNE"; break;
     case IR_LE: salto = "BLE"; break;
     case IR_GE: salto = "BGE"; break;
-    case IR_LT: salto = "BLE"; izq = IR_R1; der = IR_R2; break; /* a < b equivale a (a <= b) y (a != b). */
-    case IR_GT: salto = "BGE"; izq = IR_R1; der = IR_R2; break;
+    case IR_LT: salto = "BLE"; break;
+    case IR_GT: salto = "BGE"; break;
     default: return 0;
     }
-    /* Las relaciones estrictas se expresan como <= y !=. */
+
     if (op == IR_LT || op == IR_GT) {
-        if (!emitir(e, "ALU", "ADDI x%d, x0, 0", IR_RD) ||
-            !emitir(e, "BRU", "BEQ x%d, x%d, %s", IR_R1, IR_R2, fin) ||
-            !emitir(e, "BRU", "%s x%d, x%d, %s", op == IR_LT ? "BLE" : "BGE", izq, der, verdadero) ||
+        if (!emitir(e, "ALU", "ADDI x%d, x0, 0", destino) ||
+            !emitir(e, "BRU", "BEQ x%d, x%d, %s", izq, der, fin) ||
+            !emitir(e, "BRU", "%s x%d, x%d, %s",
+                    op == IR_LT ? "BLE" : "BGE", izq, der, verdadero) ||
             !emitir(e, "BRU", "JMP %s", fin) ||
             !codegen_motor_etiqueta(e->motor, verdadero) ||
-            !emitir(e, "ALU", "ADDI x%d, x0, 1", IR_RD) ||
+            !emitir(e, "ALU", "ADDI x%d, x0, 1", destino) ||
             !codegen_motor_etiqueta(e->motor, fin)) return 0;
         return 1;
     }
-    return emitir(e, "ALU", "ADDI x%d, x0, 0", IR_RD) &&
+
+    return emitir(e, "ALU", "ADDI x%d, x0, 0", destino) &&
            emitir(e, "BRU", "%s x%d, x%d, %s", salto, izq, der, verdadero) &&
            emitir(e, "BRU", "JMP %s", fin) &&
            codegen_motor_etiqueta(e->motor, verdadero) &&
-           emitir(e, "ALU", "ADDI x%d, x0, 1", IR_RD) &&
+           emitir(e, "ALU", "ADDI x%d, x0, 1", destino) &&
            codegen_motor_etiqueta(e->motor, fin);
-}
-
-/*
- * Multiplicacion de 32 bits por desplazamiento y suma.
- * Trabajamos con los patrones binarios de los operandos: los 32 bits
- * bajos coinciden con la multiplicacion con signo en complemento a dos.
- * x7 guarda el acumulador y x8 el bit menos significativo.
- */
-static int multiplicar_ir(EstadoIR *e)
-{
-    char bucle[80], omitir[80], fin[80];
-    if (!etiqueta_auxiliar(e, "mul_loop", bucle, sizeof(bucle)) ||
-        !etiqueta_auxiliar(e, "mul_skip", omitir, sizeof(omitir)) ||
-        !etiqueta_auxiliar(e, "mul_end", fin, sizeof(fin))) return 0;
-    return emitir(e, "ALU", "ADDI x7, x0, 0") &&
-           emitir(e, "ALU", "ADDI x8, x0, 1") &&
-           codegen_motor_etiqueta(e->motor, bucle) &&
-           emitir(e, "BRU", "BEQ x%d, x0, %s", IR_R2, fin) &&
-           emitir(e, "ALU", "AND x8, x%d, x8", IR_R2) &&
-           emitir(e, "BRU", "BEQ x8, x0, %s", omitir) &&
-           emitir(e, "ALU", "ADD x7, x7, x%d", IR_R1) &&
-           codegen_motor_etiqueta(e->motor, omitir) &&
-           emitir(e, "ALU", "SLLI x%d, x%d, 1", IR_R1, IR_R1) &&
-           emitir(e, "ALU", "SRLI x%d, x%d, 1", IR_R2, IR_R2) &&
-           emitir(e, "ALU", "ADDI x8, x0, 1") &&
-           emitir(e, "BRU", "JMP %s", bucle) &&
-           codegen_motor_etiqueta(e->motor, fin) &&
-           emitir(e, "ALU", "ADD x%d, x7, x0", IR_RD);
 }
 
 /* Traducimos las instrucciones sencillas y rechazamos las no implementadas.
@@ -1182,6 +1269,113 @@ static int desapilar_ir(EstadoIR *e, int reg)
 {
     return emitir(e, "LSU", "LOAD x%d, 0(x14)", reg) &&
            emitir(e, "ALU", "ADDI x14, x14, 4");
+}
+
+
+static int guardar_banco_temporal_ir(EstadoIR *e)
+{
+    for (int reg = 4; reg <= 12; ++reg)
+        if (!apilar_ir(e, reg)) return 0;
+    return 1;
+}
+
+static int restaurar_banco_temporal_ir(EstadoIR *e)
+{
+    for (int reg = 12; reg >= 4; --reg)
+        if (!desapilar_ir(e, reg)) return 0;
+    return 1;
+}
+
+/* Empuja un operando sin copiar un temporal coloreado sobre otro x4-x12. */
+static int apilar_operando_ir(EstadoIR *e, const char *nombre)
+{
+    int reg = registro_temporal_mapeado(e, nombre);
+
+    if (reg >= 0)
+        return apilar_ir(e, reg);
+
+    return cargar(e, nombre, 3) && apilar_ir(e, 3);
+}
+
+/*
+ * IR_PARAM consume semanticamente el argumento en el punto donde aparece.
+ * Con Chaitin, dos temporales de parametros distintos pueden reutilizar el
+ * mismo registro despues de su IR_PARAM. Como llamar_ir materializa la pila
+ * mas tarde, congelamos aqui los temporales coloreados en su slot de respaldo
+ * y los recuperamos al construir la llamada.
+ */
+static int congelar_argumento_ir(EstadoIR *e, const char *nombre)
+{
+    long dir;
+    int reg;
+
+    if (!e || !nombre)
+        return 0;
+
+    if (e->config == NULL ||
+        e->config->asignacion_registros == NULL ||
+        !es_temporal(nombre))
+        return 1;
+
+    reg = registro_temporal_mapeado(e, nombre);
+
+    /* Un temporal no coloreado ya utiliza su respaldo en memoria. */
+    if (reg < 0)
+        return 1;
+
+    if (!direccion_temporal(e, nombre, &dir))
+        return 0;
+
+    return constante(e, 13, (int32_t)dir) &&
+           emitir(e, "LSU", "STORE x%d, 0(x13)", reg);
+}
+
+static int apilar_argumento_congelado_ir(EstadoIR *e, const char *nombre)
+{
+    long dir;
+
+    if (e == NULL || nombre == NULL)
+        return 0;
+
+    if (e->config != NULL &&
+        e->config->asignacion_registros != NULL &&
+        es_temporal(nombre)) {
+        if (!direccion_temporal(e, nombre, &dir))
+            return 0;
+
+        return constante(e, 13, (int32_t)dir) &&
+               emitir(e, "LSU", "LOAD x3, 0(x13)") &&
+               apilar_ir(e, 3);
+    }
+
+    return apilar_operando_ir(e, nombre);
+}
+
+/*
+ * Las rutinas software MUL/DIV/MOD/POW usan libremente x4-x12. Antes de
+ * llamarlas preservamos el banco asignado por Chaitin, colocamos los dos
+ * operandos en x4/x5 y conservamos el resultado en x2 mientras restauramos.
+ */
+static int operacion_entera_resguardada(EstadoIR *e,
+                                        const IRInstruction *i,
+                                        CodegenOperacionEntera operacion)
+{
+    if (!e || !i || !i->arg1 || !i->arg2 || !i->result)
+        return 0;
+
+    if (!guardar_banco_temporal_ir(e) ||
+        !apilar_operando_ir(e, i->arg1) ||
+        !apilar_operando_ir(e, i->arg2) ||
+        !desapilar_ir(e, IR_R2) ||
+        !desapilar_ir(e, IR_R1) ||
+        !codegen_motor_operacion_entera(e->motor, operacion,
+                                       IR_R1, IR_R2, IR_RD) ||
+        !emitir(e, "ALU", "ADD x2, x%d, x0", IR_RD) ||
+        !restaurar_banco_temporal_ir(e) ||
+        !guardar(e, i->result, 2))
+        return 0;
+
+    return 1;
 }
 
 /*
@@ -1213,17 +1407,15 @@ static int llamar_ir(EstadoIR *e, const IRInstruction *i)
         snprintf(destino, sizeof(destino), "func_%s", i->arg1) >= (int)sizeof(destino))
         return fallo(e, i, "etiqueta de llamada demasiado larga");
 
-    /* Primero se guardan los registros del llamador. */
-    for (int reg = 4; reg <= 12; ++reg)
-        if (!apilar_ir(e, reg)) return 0;
+    /* Primero se guardan los registros x4-x12 del llamador. */
+    if (!guardar_banco_temporal_ir(e)) return 0;
 
-    /* Preservamos temporales IR, incluso durante llamadas recursivas. */
-    for (size_t t = 0; t < e->cantidad_temporales; ++t)
-        if (!cargar(e, e->temporales[t], IR_R1) || !apilar_ir(e, IR_R1)) return 0;
-
-    /* El primer argumento debe quedar en 8(FP) de la funcion llamada. */
+    /*
+     * Los argumentos se empujan directamente desde el registro asignado
+     * por Chaitin. Para constantes/variables usamos x3, que es auxiliar.
+     */
     for (size_t a = n; a > 0; --a)
-        if (!cargar(e, e->argumentos[a - 1], IR_R1) || !apilar_ir(e, IR_R1)) return 0;
+        if (!apilar_argumento_congelado_ir(e, e->argumentos[a - 1])) return 0;
 
     if (!emitir(e, "ALU", "ADDI x14, x14, -4") ||
         !emitir(e, "ALU", "ADDI x3, x1, %s", retorno) ||
@@ -1235,12 +1427,8 @@ static int llamar_ir(EstadoIR *e, const IRInstruction *i)
     for (size_t a = 0; a < n; ++a)
         if (!emitir(e, "ALU", "ADDI x14, x14, 4")) return 0;
 
-    /* Se conserva x2 mientras se restauran los datos del llamador. */
-    for (size_t t = e->cantidad_temporales; t > 0; --t)
-        if (!desapilar_ir(e, IR_R1) ||
-            !guardar(e, e->temporales[t - 1], IR_R1)) return 0;
-    for (int reg = 12; reg >= 4; --reg)
-        if (!desapilar_ir(e, reg)) return 0;
+    /* x2 conserva el valor de retorno mientras restauramos x4-x12. */
+    if (!restaurar_banco_temporal_ir(e)) return 0;
 
     e->cantidad_argumentos = 0;
     return !i->result || guardar(e, i->result, 2);
@@ -1290,18 +1478,20 @@ static int traducir_feist_ir(EstadoIR *e, const IRInstruction *i)
         if (n != 0) return fallo(e, i, "LOGOUT no recibe argumentos");
         ok = emitir(e, "FEIST", "LOGOUT");
     } else if (!strcmp(nombre, "feist_auth")) {
+        int r0, r1;
         if (n != 2) return fallo(e, i, "AUTH requiere dos argumentos");
-        ok = cargar(e, e->argumentos[0], 4) &&
-             cargar(e, e->argumentos[1], 5) &&
-             emitir(e, "FEIST", "AUTH x4, x5");
+        ok = operando_en_registro(e, e->argumentos[0], 2, &r0) &&
+             operando_en_registro(e, e->argumentos[1], 3, &r1) &&
+             emitir(e, "FEIST", "AUTH x%d, x%d", r0, r1);
     } else if (!strcmp(nombre, "feist_kstore")) {
+        int r;
         if (n != 3) return fallo(e, i, "KSTORE requiere tres argumentos");
         llave = inmediato_feist_ir(args[0], 3);
         ronda = inmediato_feist_ir(args[1], 3);
         if (llave < 0 || ronda < 0)
             return fallo(e, i, "KSTORE requiere llave y ronda literales 0..3");
-        ok = cargar(e, e->argumentos[2], 4) &&
-             emitir(e, "FEIST", "KSTORE %d, %d, x4", llave, ronda);
+        ok = operando_en_registro(e, e->argumentos[2], 3, &r) &&
+             emitir(e, "FEIST", "KSTORE %d, %d, x%d", llave, ronda, r);
     } else if (!strcmp(nombre, "feist_fround")) {
         if (n != 7) return fallo(e, i, "FROUND requiere siete argumentos");
         llave = inmediato_feist_ir(args[4], 3);
@@ -1313,81 +1503,126 @@ static int traducir_feist_ir(EstadoIR *e, const IRInstruction *i)
             !args[0]->valor || !args[1]->valor ||
             !strcmp(args[0]->valor, args[1]->valor))
             return fallo(e, i, "destinos o inmediatos FROUND invalidos");
-        /* Las fuentes IR ya fueron evaluadas antes de emitir los IR_PARAM.
-           Los registros de salida x7 y x8 son diferentes de las fuentes. */
-        ok = cargar(e, e->argumentos[2], 4) &&
-             cargar(e, e->argumentos[3], 5) &&
-             emitir(e, "FEIST", "FROUND x7, x8, x4, x5, %d, %d, %d",
-                    llave, ronda, modo) &&
-             guardar(e, args[0]->valor, 7) &&
-             guardar(e, args[1]->valor, 8);
+        {
+            int rL, rR;
+            /* x2/x3 son auxiliares fuera del rango asignado por Chaitin. */
+            ok = operando_en_registro(e, e->argumentos[2], 2, &rL) &&
+                 operando_en_registro(e, e->argumentos[3], 3, &rR) &&
+                 emitir(e, "FEIST",
+                        "FROUND x2, x3, x%d, x%d, %d, %d, %d",
+                        rL, rR, llave, ronda, modo) &&
+                 guardar(e, args[0]->valor, 2) &&
+                 guardar(e, args[1]->valor, 3);
+        }
     }
     if (!ok) return fallo(e, i, "no se pudo emitir la instruccion FEIST");
     e->cantidad_argumentos = 0;
     return 1;
 }
 
-/* Calcula la base real de una lista o matriz, incluyendo parametros por referencia. */
+/* Calcula la base real de una lista o matriz en el registro indicado. */
 static int base_indexada_ir(EstadoIR *e, const IRInstruction *i,
-                            const char *nombre, int matriz)
+                            const char *nombre, int matriz, int reg_destino)
 {
     CodegenSimbolo s;
+
     if (!nombre || !e->config || !e->config->resolver_ir ||
         !e->config->resolver_ir(e->config->contexto_ir, e->nodo_actual,
                                 e->funcion, nombre, &s))
         return fallo(e, i, "no se encontro el arreglo en su ambito");
+
     if (s.forma != (matriz ? CODEGEN_FORMA_MATRIZ : CODEGEN_FORMA_LISTA) ||
         s.cantidad_dimensiones < (matriz ? 2u : 1u))
         return fallo(e, i, "forma o dimensiones del arreglo incompatibles");
-    if (s.ubicacion == CODEGEN_UBICACION_GLOBAL) {
-        if (s.direccion < INT32_MIN || s.direccion > INT32_MAX) return 0;
-        return constante(e, IR_DIR, (int32_t)s.direccion);
-    }
+
+    if (s.direccion < INT32_MIN || s.direccion > INT32_MAX)
+        return 0;
+
+    if (s.ubicacion == CODEGEN_UBICACION_GLOBAL)
+        return constante(e, reg_destino, (int32_t)s.direccion);
+
     if (s.ubicacion != CODEGEN_UBICACION_LOCAL &&
-        s.ubicacion != CODEGEN_UBICACION_PARAMETRO) return 0;
-    if (s.direccion < INT32_MIN || s.direccion > INT32_MAX) return 0;
-    if (!constante(e, IR_DIR, (int32_t)s.direccion) ||
-        !emitir(e, "ALU", "ADD x%d, x15, x%d", IR_DIR, IR_DIR)) return 0;
+        s.ubicacion != CODEGEN_UBICACION_PARAMETRO)
+        return 0;
+
+    if (!constante(e, reg_destino, (int32_t)s.direccion) ||
+        !emitir(e, "ALU", "ADD x%d, x15, x%d",
+                reg_destino, reg_destino))
+        return 0;
+
     if (s.parametro_por_referencia)
-        return emitir(e, "LSU", "LOAD x%d, 0(x%d)", IR_DIR, IR_DIR);
+        return emitir(e, "LSU", "LOAD x%d, 0(x%d)",
+                      reg_destino, reg_destino);
+
     return 1;
 }
 
-/* Genera la direccion del elemento en x11, preservandola ante cargar(). */
+/*
+ * Calcula la direccion de un elemento exclusivamente con registros
+ * reservados del backend (x2, x3 y x13), por lo que no destruye los
+ * temporales x4-x12 asignados por Chaitin.
+ */
 static int direccion_indexada_ir(EstadoIR *e, const IRInstruction *i,
                                  const char *nombre, const char *fila,
                                  const char *columna, int matriz)
 {
     CodegenSimbolo s;
+
     if (!nombre || !fila || !e->config->resolver_ir ||
         !e->config->resolver_ir(e->config->contexto_ir, e->nodo_actual,
                                 e->funcion, nombre, &s))
         return fallo(e, i, "arreglo sin simbolo valido");
+
     if (s.forma != (matriz ? CODEGEN_FORMA_MATRIZ : CODEGEN_FORMA_LISTA))
         return fallo(e, i, "tipo de arreglo incompatible");
-    if (matriz) {
-        if (!columna || s.cantidad_dimensiones < 2 || !s.dimensiones[1] ||
-            s.dimensiones[1] > INT32_MAX) return fallo(e, i, "columnas invalidas");
-        /* Guardamos columna antes de multiplicar fila por cantidad de columnas. */
-        if (!cargar(e, columna, 10) || !cargar(e, fila, IR_R1) ||
-            !constante(e, IR_R2, (int32_t)s.dimensiones[1]) ||
-            !multiplicar_ir(e) ||
-            !emitir(e, "ALU", "ADD x6, x6, x10") ||
-            !emitir(e, "ALU", "SLLI x6, x6, 2")) return 0;
-    } else {
-        if (!cargar(e, fila, 6) ||
-            !emitir(e, "ALU", "SLLI x6, x6, 2")) return 0;
+
+    if (!matriz) {
+        if (!cargar(e, fila, 3) ||
+            !emitir(e, "ALU", "SLLI x3, x3, 2") ||
+            !base_indexada_ir(e, i, nombre, 0, 13) ||
+            !emitir(e, "ALU", "ADD x13, x13, x3"))
+            return 0;
+        return 1;
     }
-    /* x6 es el desplazamiento y no se modifica al obtener la base. */
-    return base_indexada_ir(e, i, nombre, matriz) &&
-           emitir(e, "ALU", "ADD x11, x%d, x6", IR_DIR);
+
+    if (!columna || s.cantidad_dimensiones < 2 ||
+        !s.dimensiones[1] || s.dimensiones[1] > INT32_MAX)
+        return fallo(e, i, "columnas invalidas");
+
+    {
+        char bucle[80], fin[80];
+
+        if (!etiqueta_auxiliar(e, "idx_mul", bucle, sizeof(bucle)) ||
+            !etiqueta_auxiliar(e, "idx_mul_fin", fin, sizeof(fin)))
+            return 0;
+
+        /* x13 = fila * numero_columnas mediante suma repetida. */
+        if (!cargar(e, fila, 2) ||
+            !constante(e, 3, (int32_t)s.dimensiones[1]) ||
+            !constante(e, 13, 0) ||
+            !codegen_motor_etiqueta(e->motor, bucle) ||
+            !emitir(e, "BRU", "BEQ x2, x0, %s", fin) ||
+            !emitir(e, "ALU", "ADD x13, x13, x3") ||
+            !emitir(e, "ALU", "ADDI x2, x2, -1") ||
+            !emitir(e, "BRU", "JMP %s", bucle) ||
+            !codegen_motor_etiqueta(e->motor, fin))
+            return 0;
+    }
+
+    /* offset = (fila * columnas + columna) * 4 */
+    if (!cargar(e, columna, 3) ||
+        !emitir(e, "ALU", "ADD x13, x13, x3") ||
+        !emitir(e, "ALU", "SLLI x13, x13, 2") ||
+        !base_indexada_ir(e, i, nombre, 1, 2) ||
+        !emitir(e, "ALU", "ADD x13, x2, x13"))
+        return 0;
+
+    return 1;
 }
 
-/* Traduce lectura/escritura; IR almacena la segunda dimension en extra. */
-
 /* Traduce los accesos internos a la memoria de Spilling. */
-static int acceso_spilling_ir(
-    EstadoIR *e, const IRInstruction *i, int escritura)
+static int acceso_spilling_ir(EstadoIR *e, const IRInstruction *i,
+                              int escritura)
 {
     const char *indice = escritura ? i->arg1 : i->arg2;
     const char *valor = escritura ? i->arg2 : i->result;
@@ -1404,16 +1639,23 @@ static int acceso_spilling_ir(
     if (direccion > MEMORIA_TOTAL_BYTES - TAMANO_PALABRA)
         return fallo(e, i, "direccion de Spilling invalida");
 
-    /* Conservamos la dirección en x11. */
-    if (!constante(e, 11, (int32_t)direccion))
+    if (!constante(e, 13, (int32_t)direccion))
         return 0;
 
-    if (escritura)
-        return cargar(e, valor, 4) &&
-               emitir(e, "LSU", "STORE x4, 0(x11)");
+    if (escritura) {
+        int rv;
+        return operando_en_registro(e, valor, 3, &rv) &&
+               emitir(e, "LSU", "STORE x%d, 0(x13)", rv);
+    }
 
-    return emitir(e, "LSU", "LOAD x4, 0(x11)") &&
-           guardar(e, valor, 4);
+    {
+        int rd = registro_temporal_mapeado(e, valor);
+        if (rd >= 0)
+            return emitir(e, "LSU", "LOAD x%d, 0(x13)", rd);
+
+        return emitir(e, "LSU", "LOAD x3, 0(x13)") &&
+               guardar(e, valor, 3);
+    }
 }
 
 static int acceso_indexado_ir(EstadoIR *e, const IRInstruction *i,
@@ -1423,14 +1665,25 @@ static int acceso_indexado_ir(EstadoIR *e, const IRInstruction *i,
     const char *fila = escritura ? i->arg1 : i->arg2;
     const char *columna = matriz ? (escritura ? i->arg2 : i->extra) : NULL;
     const char *valor = escritura ? (matriz ? i->extra : i->arg2) : i->result;
+
     if (!nombre || !fila || !valor ||
         !direccion_indexada_ir(e, i, nombre, fila, columna, matriz))
         return fallo(e, i, "no se pudo calcular la direccion indexada");
+
     if (escritura) {
-        /* cargar() puede modificar x13, por eso guardamos la direccion en x11. */
-        return cargar(e, valor, 4) && emitir(e, "LSU", "STORE x4, 0(x11)");
+        int rv;
+        return operando_en_registro(e, valor, 3, &rv) &&
+               emitir(e, "LSU", "STORE x%d, 0(x13)", rv);
     }
-    return emitir(e, "LSU", "LOAD x4, 0(x11)") && guardar(e, valor, 4);
+
+    {
+        int rd = registro_temporal_mapeado(e, valor);
+        if (rd >= 0)
+            return emitir(e, "LSU", "LOAD x%d, 0(x13)", rd);
+
+        return emitir(e, "LSU", "LOAD x3, 0(x13)") &&
+               guardar(e, valor, 3);
+    }
 }
 
 static int traducir(EstadoIR *e, const IRInstruction *i)
@@ -1499,10 +1752,25 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
                                        e->funcion, i->arg1, &origen) &&
                 (origen.forma == CODEGEN_FORMA_LISTA ||
                  origen.forma == CODEGEN_FORMA_MATRIZ)) {
+                int rd = registro_temporal_mapeado(e, i->result);
+                int destino = rd >= 0 ? rd : IR_R1;
                 return base_indexada_ir(e, i, i->arg1,
-                          origen.forma == CODEGEN_FORMA_MATRIZ) &&
-                       emitir(e, "ALU", "ADD x%d, x%d, x0", IR_R1, IR_DIR) &&
-                       guardar(e, i->result, IR_R1);
+                          origen.forma == CODEGEN_FORMA_MATRIZ, destino) &&
+                       (rd >= 0 || guardar(e, i->result, destino));
+            }
+        }
+
+        if (e->config->asignacion_registros != NULL) {
+            int rd = registro_temporal_mapeado(e, i->result);
+
+            if (rd >= 0)
+                return cargar(e, i->arg1, rd);
+
+            {
+                int rs;
+                if (!operando_en_registro(e, i->arg1, 3, &rs))
+                    return 0;
+                return guardar(e, i->result, rs);
             }
         }
 
@@ -1557,24 +1825,22 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
     case IR_SUB: operacion = "SUB"; break;
 
     case IR_MUL:
-        /* Reutilizamos la multiplicación del CodeGen original.
-           Esto evita duplicar el algoritmo en el backend IR. */
+        if (e->config->asignacion_registros != NULL)
+            return operacion_entera_resguardada(e, i, CODEGEN_ENTERA_MUL);
         return i->arg1 && i->arg2 && i->result &&
                cargar(e, i->arg1, IR_R1) &&
                cargar(e, i->arg2, IR_R2) &&
                codegen_motor_operacion_entera(
-                   e->motor,
-                   CODEGEN_ENTERA_MUL,
-                   IR_R1,
-                   IR_R2,
-                   IR_RD
-               ) &&
+                   e->motor, CODEGEN_ENTERA_MUL, IR_R1, IR_R2, IR_RD) &&
                guardar(e, i->result, IR_RD);
     case IR_DIV:
     case IR_MOD:
     case IR_POW:
-        /* Estas operaciones reutilizan las rutinas del CodeGen original.
-           Conservamos intactas las llamadas FEIST y el resto del backend IR. */
+        if (e->config->asignacion_registros != NULL)
+            return operacion_entera_resguardada(
+                e, i,
+                i->op == IR_DIV ? CODEGEN_ENTERA_DIV :
+                i->op == IR_MOD ? CODEGEN_ENTERA_MOD : CODEGEN_ENTERA_POW);
         return i->arg1 && i->arg2 && i->result &&
                cargar(e, i->arg1, IR_R1) &&
                cargar(e, i->arg2, IR_R2) &&
@@ -1582,20 +1848,37 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
                    e->motor,
                    i->op == IR_DIV ? CODEGEN_ENTERA_DIV :
                    i->op == IR_MOD ? CODEGEN_ENTERA_MOD : CODEGEN_ENTERA_POW,
-                   IR_R1, IR_R2, IR_RD
-               ) &&
+                   IR_R1, IR_R2, IR_RD) &&
                guardar(e, i->result, IR_RD);
     case IR_EQ: case IR_NE: case IR_LT: case IR_LE: case IR_GT: case IR_GE:
+        if (e->config->asignacion_registros != NULL) {
+            int rd = registro_temporal_mapeado(e, i->result);
+            if (rd < 0 ||
+                !cargar(e, i->arg1, 2) ||
+                !cargar(e, i->arg2, 3))
+                return 0;
+            return comparar_ir(e, i->op, 2, 3, rd);
+        }
         return i->arg1 && i->arg2 && i->result &&
                cargar(e, i->arg1, IR_R1) && cargar(e, i->arg2, IR_R2) &&
-               comparar_ir(e, i->op) && guardar(e, i->result, IR_RD);
+               comparar_ir(e, i->op, IR_R1, IR_R2, IR_RD) &&
+               guardar(e, i->result, IR_RD);
 
     case IR_NEG:
-
+        if (e->config->asignacion_registros != NULL) {
+            int rd = registro_temporal_mapeado(e, i->result);
+            int rs;
+            if (rd < 0) return 0;
+            if (registro_temporal_mapeado(e, i->arg1) >= 0)
+                rs = registro_temporal_mapeado(e, i->arg1);
+            else {
+                if (!cargar(e, i->arg1, rd)) return 0;
+                rs = rd;
+            }
+            return emitir(e, "ALU", "SUB x%d, x0, x%d", rd, rs);
+        }
         return i->arg1 && i->result && cargar(e, i->arg1, IR_R1) &&
-
                emitir(e, "ALU", "SUB x%d, x0, x%d", IR_RD, IR_R1) &&
-
                guardar(e, i->result, IR_RD);
 
     case IR_LABEL:
@@ -1610,11 +1893,18 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
 
     case IR_IF_FALSE:
 
-        if (!i->arg1 || !i->result || !cargar(e, i->arg1, IR_R1)) return 0;
-
+        if (!i->arg1 || !i->result) return 0;
+        if (e->config->asignacion_registros != NULL) {
+            int rc;
+            if (!operando_en_registro(e, i->arg1, 3, &rc)) return 0;
+            return emitir(e, "BRU", "%s x%d, x0, %s",
+                          i->op == IR_IF_TRUE ? "BNE" : "BEQ",
+                          rc, i->result);
+        }
+        if (!cargar(e, i->arg1, IR_R1)) return 0;
         return emitir(e, "BRU", "%s x%d, x0, %s",
-
-                      i->op == IR_IF_TRUE ? "BNE" : "BEQ", IR_R1, i->result);
+                      i->op == IR_IF_TRUE ? "BNE" : "BEQ",
+                      IR_R1, i->result);
 
 
 
@@ -1765,15 +2055,16 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
  */
 
         if (i->arg1) {
-
-            if (!cargar(e, i->arg1, IR_R1) ||
-
-                !emitir(e, "ALU",
-
-                        "ADD x2, x%d, x0", IR_R1))
-
-                return 0;
-
+            int rr;
+            if (e->config->asignacion_registros != NULL) {
+                if (!operando_en_registro(e, i->arg1, 3, &rr) ||
+                    !emitir(e, "ALU", "ADD x2, x%d, x0", rr))
+                    return 0;
+            } else {
+                if (!cargar(e, i->arg1, IR_R1) ||
+                    !emitir(e, "ALU", "ADD x2, x%d, x0", IR_R1))
+                    return 0;
+            }
         }
 
 
@@ -1819,6 +2110,8 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
     case IR_PARAM:
         if (!i->arg1 || e->cantidad_argumentos >= 64)
             return fallo(e, i, "argumento IR invalido o limite excedido");
+        if (!congelar_argumento_ir(e, i->arg1))
+            return fallo(e, i, "no se pudo congelar argumento IR");
         e->argumentos[e->cantidad_argumentos++] = i->arg1;
         return 1;
 
@@ -1828,7 +2121,7 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
     case IR_ARRAY_DECL:
     case IR_MATRIX_DECL:
         /* El analisis semantico ya reservo el espacio del simbolo. */
-        return base_indexada_ir(e, i, i->result, i->op == IR_MATRIX_DECL);
+        return base_indexada_ir(e, i, i->result, i->op == IR_MATRIX_DECL, 13);
 
     case IR_ARRAY_LOAD:
         if (i->arg1 && strcmp(i->arg1, SPILL_IR_AREA) == 0)
@@ -1850,12 +2143,21 @@ static int traducir(EstadoIR *e, const IRInstruction *i)
 
     }
 
+    if (operacion && i->arg1 && i->arg2 && i->result &&
+        e->config->asignacion_registros != NULL) {
+        int rd = registro_temporal_mapeado(e, i->result);
+        int r1, r2;
+        if (rd < 0 || !preparar_binaria_directa(
+                e, i->arg1, i->arg2, rd, &r1, &r2))
+            return 0;
+        return emitir(e, "ALU", "%s x%d, x%d, x%d",
+                      operacion, rd, r1, r2);
+    }
+
     return operacion && i->arg1 && i->arg2 && i->result &&
-
            cargar(e, i->arg1, IR_R1) && cargar(e, i->arg2, IR_R2) &&
-
-           emitir(e, "ALU", "%s x%d, x%d, x%d", operacion, IR_RD, IR_R1, IR_R2) &&
-
+           emitir(e, "ALU", "%s x%d, x%d, x%d",
+                  operacion, IR_RD, IR_R1, IR_R2) &&
            guardar(e, i->result, IR_RD);
 
 }

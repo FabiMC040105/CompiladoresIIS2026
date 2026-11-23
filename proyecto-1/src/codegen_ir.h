@@ -3,6 +3,7 @@
 
 #include "ir.h"
 #include "codegen.h"
+#include "asignacion_registros.h"
 #include <stddef.h>
 
 /*
@@ -25,6 +26,12 @@ typedef struct {
     CodegenConfig original;
     CodegenIRResolver resolver_ir;
     void *contexto_ir;
+
+    /*
+     * Asignacion final producida por Chaitin despues de resolver spilling.
+     * Cuando es NULL se conserva el backend de memoria anterior.
+     */
+    const AsignacionRegistros *asignacion_registros;
 } CodegenIRConfig;
 
 typedef struct {

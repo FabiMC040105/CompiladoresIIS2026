@@ -243,6 +243,12 @@ test-integracion: all check-arqui
 test-feist-auto: all check-arqui
 	ARQ_ROOT="$(ARQ_ROOT)" bash ./validar_feist_auto.sh
 
+# Integracion actual CE1108 -> CE4301: compila un programa optimizado,
+# valida su ASM y ejecuta el binario sobre CPU + L1 + L2 + RAM reales.
+.PHONY: test-rtl-actual
+test-rtl-actual: all check-arqui
+	ARQ_ROOT="$(ARQ_ROOT)" bash pruebas/probar_integracion_rtl_actual.sh
+
 sim: test-integracion
 
 test-completo: test test-integracion test-feist-auto
@@ -449,3 +455,47 @@ test-spill-completo: \
 	@echo "PASS: integracion con optimizaciones IR"
 	@echo "PASS: backend IR"
 	@echo "PASS: 3 programas obligatorios"
+
+# ---------------------------------------------------------------
+# Proyecto 2: enlazado entre archivos con #traigase
+# ---------------------------------------------------------------
+.PHONY: test-importaciones
+
+test-importaciones: all
+	./pruebas/probar_importaciones.sh
+
+# ---------------------------------------------------------------
+# Suite final de 15 pruebas y métricas gráficas del Proyecto 2.
+# ---------------------------------------------------------------
+.PHONY: test-suite-optimizaciones metricas-optimizaciones
+
+test-suite-optimizaciones: all
+	$(PYTHON) pruebas/medir_suite_optimizaciones.py
+
+metricas-optimizaciones: test-suite-optimizaciones
+	@echo "PASS: métricas y gráficas generadas en ../docs/metricas-optimizaciones"
+
+# ---------------------------------------------------------------
+# Bateria maestra de entrega - Proyecto II
+# ---------------------------------------------------------------
+.PHONY: test-ide test-entrega-local test-entrega
+
+test-ide:
+	cd ../.. && python3 -m unittest discover -s ide/tests -p 'test_*.py' -v
+	@if command -v node >/dev/null 2>&1; then \
+		cd ../.. && node ide/tests/test_frontend.js; \
+	else \
+		echo 'AVISO: Node.js no instalado; se omite test_frontend.js (pruebas Python completadas).'; \
+	fi
+
+test-entrega-local: test test-codegen-ir-backend test-importaciones test-spill-completo test-suite-optimizaciones test-ide
+	@echo ''
+	@echo '=================================================='
+	@echo 'PASS: BATERIA LOCAL DE ENTREGA COMPLETADA'
+	@echo '=================================================='
+
+test-entrega: test-entrega-local test-rtl-actual
+	@echo ''
+	@echo '=================================================='
+	@echo 'PASS: PROYECTO II - VALIDACION FINAL COMPLETA'
+	@echo '=================================================='
