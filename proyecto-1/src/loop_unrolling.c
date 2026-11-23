@@ -189,6 +189,24 @@ static int find_simple_loop(const IRProgram *p, const BasicBlockCFG *cfg,
     if (!eq(p->instructions[branch].result, exit_label)) return 0;
     if (!has_backedge(cfg, start, latch)) return 0;
 
+
+    /*
+     * Heuristica conservadora de rentabilidad:
+     * no expandir ciclos cuyo limite no es un literal numerico.
+     * Evita crecimiento excesivo de temporales y llamadas.
+     */
+    {
+        const IRInstruction *cmp = &p->instructions[branch - 1];
+        char *end = NULL;
+
+        if (!cmp->arg2) return 0;
+        errno = 0;
+        (void)strtol(cmp->arg2, &end, 10);
+
+        if (errno || end == cmp->arg2 || *end != '\0')
+            return 0;
+    }
+
     /* No expando los ciclos cortos que la heuristica reconoce */
     if (skip_short_constant_loop(p, start, branch, factor))
         return 0;
