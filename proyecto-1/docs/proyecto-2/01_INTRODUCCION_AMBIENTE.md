@@ -81,4 +81,4 @@ Los componentes que vienen del Proyecto I se conservan y amplían. El IDE es una
 
 ## 1.5 Límites de este avance
 
-La IR y las optimizaciones cuentan con pruebas locales, pero la integración completa de las cuatro optimizaciones hasta el binario ejecutable no está demostrada. La versión actual también necesita resultados medidos en hardware/simulador para el análisis comparativo solicitado. Para el detalle, consultar [07 — Pendientes](07_PENDIENTES.md).
+La revisión del 22 de noviembre de 2026, con archivos empaquetados a las 01:15 UTC del 23 de noviembre, incorpora las **cinco fases IR** dentro de `opt_ir_aplicar_config()`: loop unrolling, DCE, renombramiento, reordenamiento y spilling. El backend IR ya contiene traducción de los accesos internos de spilling, pero aún hace falta un caso reproducible que compruebe las cinco fases sobre el mismo programa fuente hasta un `.bin` ejecutado en el procesador VLIW. Las pruebas modulares sí se ejecutaron y se registran en [04 — Uso y validación](04_USO_Y_VALIDACION.md). Ver [07 — Pendientes](07_PENDIENTES.md).

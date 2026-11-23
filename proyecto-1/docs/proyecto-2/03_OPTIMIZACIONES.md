@@ -1,80 +1,102 @@
-# 3. Representación intermedia y optimizaciones
+# 3. Representación intermedia, análisis y optimizaciones
 
-## 3.1 Representación intermedia (IR)
+## 3.1 IR de tres direcciones
 
-La IR implementada en `ir.h` utiliza una secuencia de `IRInstruction` administrada por `IRProgram`. Cada instrucción contiene una operación (`IROp`), hasta cuatro campos de operandos/resultados, la línea de origen y un puntero no propietario al nodo AST. Se admiten asignaciones, aritmética, comparaciones, etiquetas, saltos, funciones, parámetros y operaciones con arreglos y matrices.
+Los archivos `ir.c/.h` definen `IRProgram` como una secuencia dinámica de instrucciones `IRInstruction`, con contadores de temporales y etiquetas. Cada instrucción conserva operación, argumentos, resultado, campo adicional, línea de origen y un puntero no propietario `nodo_origen` al AST. `ir_ast.c` construye la IR desde el árbol generado por el parser. Se representan operaciones aritméticas y lógicas, asignaciones, saltos, funciones, parámetros, arreglos y matrices. Los temporales suelen escribirse como `%tN` y las etiquetas como `@LN`.
 
-Los temporales tienen nombres como `%t0`; las etiquetas, nombres como `@L0`. Esta representación facilita optimizar sin depender de un registro físico concreto.
+`basic_blocks.c` identifica líderes, bloques básicos y aristas del grafo de flujo de control (CFG). `liveness.c` calcula información de usos y definiciones e información IN/OUT para bloques e instrucciones, utilizada por DCE y spilling. `dependencias.c` y `dag.c` contribuyen al análisis necesario para renombrar y reordenar instrucciones de forma segura.
 
-La IR se genera desde el AST mediante `ir_generate()` y puede imprimirse usando `--emit-ir`. `basic_blocks.c` construye bloques básicos y CFG, que alimentan los análisis posteriores.
+Se puede inspeccionar la IR con `--emit-ir` y el CFG con `--ir-cfg`. Este último modo no continúa hacia la generación de ensamblador.
 
-## 3.2 Orden de las fases
+## 3.2 Coordinador de optimizaciones: estado actualizado
 
-En `optimizaciones_ir.c`, `opt_ir_aplicar()` primero clona la IR y luego ejecuta las fases elegidas en este orden:
+`optimizaciones_ir.h` define cinco bits independientes:
+
+| Fase | Constante | Objetivo |
+|---|---|---|
+| Desenrollamiento | `OPT_IR_UNROLL` | Reducir sobrecarga de control duplicando cuerpos de ciclos admitidos. |
+| Eliminación de código muerto | `OPT_IR_DCE` | Eliminar cómputos sin uso, preservando efectos observables. |
+| Renombramiento | `OPT_IR_RENOMBRAR` | Evitar falsas dependencias WAR/WAW en casos seguros. |
+| Reordenamiento | `OPT_IR_REORDENAR` | Aprovechar independencia preservando RAW/WAR/WAW y control. |
+| Spilling | `OPT_IR_SPILL` | Resolver presión de registros con almacenamiento y recargas. |
+
+`OPT_IR_TODAS` incluye **las cinco fases**, no cuatro. `opt_ir_aplicar_config()` recibe la máscara, cantidad de colores, registro base, factor de unrolling y el destino de estadísticas. Primero clona la IR. Si una fase falla, descarta la copia y conserva la IR original. Si todas terminan, reemplaza la IR de entrada con el resultado.
+
+**Orden implementado:**
 
 ```text
-IR de entrada
-    ↓
-DCE  →  Renombramiento  →  Reordenamiento  →  Spilling
-    ↓
-IR transformada y estadísticas
+IR inicial
+   |
+   v
+Loop Unrolling  (factor de 2 a 16; si la fase está activa)
+   |
+   v
+DCE  ->  Renombramiento  ->  Reordenamiento  ->  Spilling
+   |
+   v
+IR definitiva + OptIREstadisticas
 ```
 
-Cada fase se activa por máscara. La transformación se confirma al terminar satisfactoriamente; ante un error, el IR de entrada no se sustituye por una versión parcialmente transformada. **Loop unrolling** se ejecuta desde `parser.y` antes de esa secuencia, exclusivamente en la ruta IR/CFG activada.
+La función de compatibilidad `opt_ir_aplicar()` sigue disponible y llama a la función configurable con factor **2**. El parser invoca `opt_ir_aplicar_config()` en la ruta de inspección y en la ruta del backend IR, pasando el factor indicado por `--unroll N`, o **2** cuando se activa el desenrollamiento por `--opt-ir` sin definir factor.
 
-## 3.3 Eliminación de código muerto (DCE)
+`OptIREstadisticas` guarda los contadores de las cinco fases y el total de instrucciones antes y después. `opt_ir_imprimir()` reporta ciclos encontrados/desenrollados/omitidos, eliminaciones DCE, definiciones y usos renombrados, regiones reordenadas y cantidad de operaciones de spilling.
+
+## 3.3 Loop Unrolling
+
+**Archivos:** `loop_unrolling.c/.h` y `pruebas/test_loop_unrolling.c`.
+
+**Regla:** cuando se reconoce un ciclo que satisface las precondiciones, se emiten varias copias del cuerpo por iteración transformada, ajustando temporales y el control de salida. El factor configurable puede tomar valores de **2 a 16**. La configuración admite límites de crecimiento, con valores predeterminados de 32 instrucciones para el cuerpo y 256 instrucciones extra.
+
+**Restricciones:** no se debe desenrollar un ciclo cuya estructura de control o efectos no puedan conservarse con seguridad. El optimizador puede omitir ciclos por condiciones internas o por heurística de tamaño. Por tanto, activar la bandera no garantiza que todo ciclo se desenrolle.
+
+**Cambio en este avance:** la función que copia instrucciones (`emitir_copia`) también copia `nodo_origen`. Este vínculo permite al backend recuperar información de ámbitos desde el AST original al traducir la IR transformada.
+
+**Pruebas:** el conjunto `make test-loop-unrolling` verifica casos con diferentes tamaños de iteración, factores, rechazo de saltos internos, heurística de crecimiento y equivalencia de resultados. En la revisión local resultó **PASS**.
+
+**Ejemplo conceptual:**
+
+```text
+para i de 0 a N-1: total += a[i]
+```
+
+Con factor 4, el cuerpo optimizado puede procesar cuatro posiciones por grupo cuando se cumplen las precondiciones, manteniendo la lógica necesaria para cualquier resto. Esta ilustración es conceptual: el IR emitido concreto depende de la estructura reconocida por el código.
+
+## 3.4 Eliminación de código muerto (DCE)
 
 **Archivos:** `dead_code_elimination.c/.h`, `liveness.c/.h`, `basic_blocks.c/.h`.
 
-**Objetivo:** suprimir resultados que no se usan cuando la operación no tiene un efecto que deba conservarse. Se usa análisis de variables vivas y se consideran flujo y efectos de memoria, llamadas y retorno.
-
-**Ejemplo de principio de transformación:**
+Se eliminan definiciones cuyo valor no se utiliza cuando el cálculo puede retirarse sin cambiar efectos observables. Llamadas, escrituras relevantes de memoria, retornos y decisiones de control deben conservarse. El algoritmo trabaja con información de variables vivas y puede ejecutar varias pasadas.
 
 ```text
-x = 5
-%t0 = 10 + 20      # su valor nunca se usa
-return x
+Antes:                            Después:
+  a = 5                             a = 5
+  %t0 = 10 + 20                     return a
+  return a
 ```
 
-Resultado esperado:
+**Validación:** pruebas `test_dce*.c` contemplan memoria, llamadas, ciclos, variables globales y locales. Se ejecutaron dentro de `make test-opt-modulos` con resultado **PASS**.
 
-```text
-x = 5
-return x
-```
-
-**Condición de seguridad:** no eliminar una escritura a memoria, llamada con efectos u otra operación observable simplemente porque su valor no aparece en una lectura posterior.
-
-**Validación disponible:** pruebas `test_dce*.c` sobre ciclos, funciones, memoria, variables locales y globales. También se prueba la fase junto con renombramiento y reordenamiento.
-
-## 3.4 Renombramiento
+## 3.5 Renombramiento de instrucciones
 
 **Archivos:** `renombramiento.c/.h`, `dependencias.c/.h`, `dag.c/.h`.
 
-**Objetivo:** crear versiones distintas de temporales o definiciones admitidas, evitando dependencias falsas como WAR y WAW cuando es seguro. Se preservan las dependencias de lectura reales (RAW).
-
-**Ejemplo conceptual:**
+Renombra definiciones y usos admitidos para evitar dependencias artificiales **WAR** y **WAW**, sin romper la dependencia verdadera **RAW**. Conserva criterios restrictivos ante ciclos, uniones de control, llamadas, memoria o nombres ambiguos. El cambio se aplica sobre el IR, no sobre el código fuente del usuario.
 
 ```text
-%t0 = a + b
-x = %t0
-%t0 = c + d
-return %t0
+Antes:                   Forma conceptual renombrada:
+%t0 = a + b               %t0 = a + b
+x = %t0                   x = %t0
+%t0 = c + d               %t1 = c + d
+return %t0                return %t1
 ```
 
-Se puede conservar la primera versión y renombrar la segunda, actualizando exclusivamente los usos correspondientes. El algoritmo real aplica criterios conservadores para funciones, ciclos y variables, y evita renombrar casos ambiguos.
+**Validación:** `prueba_renombramiento.c` verifica antidependencias, colisiones, ciclos, llamadas, preservación del resultado y recuperación ante errores. Resultado local: **PASS**.
 
-**Precondiciones principales:** identificar la definición que alimenta cada uso, no atravesar barreras inseguras y mantener el valor observable al salir de la región.
-
-**Validación disponible:** `prueba_renombramiento.c` contempla WAW, WAR, combinaciones, CFG, llamadas, ciclos y casos ambiguos.
-
-## 3.5 Reordenamiento seguro de instrucciones
+## 3.6 Reordenamiento seguro
 
 **Archivos:** `reordenamiento.c/.h`, `dependencias.c/.h`, `dag.c/.h`.
 
-**Objetivo:** buscar órdenes de ejecución que permitan aprovechar operaciones independientes sin violar RAW, WAR, WAW ni dependencias de control y memoria. El código construye información de dependencias, valida el nuevo orden y aplica criterios sobre presión local de temporales.
-
-**Ejemplo conceptual:**
+Reordena operaciones dentro de regiones seguras según su DAG, preservando dependencias **RAW/WAR/WAW**, relaciones de control y barreras de memoria/llamadas. Busca mejorar la disponibilidad de operaciones independientes sin alterar el resultado.
 
 ```text
 %t0 = a + b
@@ -82,42 +104,34 @@ Se puede conservar la primera versión y renombrar la segunda, actualizando excl
 %t2 = c + d
 ```
 
-La suma independiente que produce `%t2` puede adelantarse, pero `%t1` debe mantenerse después de `%t0`.
+La última suma puede anticiparse cuando resulta independiente; la multiplicación no puede ejecutarse antes de que `%t0` esté disponible. La calendarización real VLIW es otra fase y requiere comprobar la semántica de latencias y bundles.
 
-**Precondiciones:** sólo reordenar cuando el DAG lo permita, preservar barreras por llamadas y memoria, y mantener la semántica de saltos y funciones.
+**Validación:** `prueba_reordenamiento.c` cubre dependencias, caminos de control, funciones, efectos y gran cantidad de bloques. Resultado local: **PASS**.
 
-**Validación disponible:** `prueba_reordenamiento.c` incluye dependencias, regiones, condiciones, ciclos, memoria, funciones y pruebas con gran cantidad de bloques.
+## 3.7 Spilling de registros y reserva de memoria
 
-## 3.6 Spilling de registros
+**Archivos:** `grafo_interferencia.c/.h`, `asignacion_registros.c/.h`, `spill_transform.c/.h` y `codegen_ir.c`.
 
-**Archivos:** `grafo_interferencia.c/.h`, `asignacion_registros.c/.h`, `spill_transform.c/.h`, `liveness.c/.h`.
+El compilador calcula variables vivas, construye un grafo de interferencia e intenta colorearlo según la cantidad de registros disponibles. Si quedan temporales sin color, reescribe usos/definiciones introduciendo cargas y almacenes hacia el área reservada `cdff_spill_area`, y repite el análisis hasta eliminar la presión, fallar o alcanzar el límite de rondas.
 
-**Objetivo:** resolver la presión cuando hay más valores simultáneamente vivos que registros disponibles. Se calcula liveness, se construye un grafo de interferencia y se intenta colorearlo con un número de registros disponible. Cuando es necesario, se reescribe la IR insertando pseudoaccesos de carga/almacenamiento en el área interna `cdff_spill_area` y se repite el análisis.
+Para mantener la compatibilidad de la IR, las recargas y escrituras internas usan `IR_ARRAY_LOAD` e `IR_ARRAY_STORE`; `cdff_spill_area` **no es un arreglo definido por el usuario**, sino un identificador reservado para el proceso de optimización.
 
-**Ejemplo conceptual:** si diez temporales requieren coexistir y se dispone de nueve colores, al menos uno puede necesitar almacenamiento temporal fuera de registros. El conjunto exacto de temporales afectados depende del grafo.
+**Cambio en este avance:** `codegen_ir.c` ya reconoce esos accesos internos y los baja a instrucciones válidas de memoria:
 
-**Validación disponible:** `prueba_grafo_interferencia.c`, `prueba_spill_transform.c`, `prueba_integracion_opt_ir.c`. Las pruebas ejecutadas incluyen presión real y comprobación de resultado equivalente.
+- Recorre la IR para determinar cuántos slots de spilling fueron utilizados.
+- Reserva el área inmediatamente después de la memoria de temporales IR, a su vez ubicada después de las variables globales.
+- Calcula la dirección en bytes como `inicio_spilling + slot * TAMANO_PALABRA`.
+- Usa `x11` como registro base de la dirección y `x4` como registro de dato para emitir `LSU LOAD` o `LSU STORE`.
+- Comprueba índices válidos y límites de la memoria de 64 KB; actualiza `limite_datos_ir` para evitar que el área invada la configuración de datos/pila.
 
-**Limitación actual:** la transformación de spilling IR existe y pasa pruebas locales, pero **`parser.y` rechaza `--codegen-ir` cuando hay `OPT_IR_SPILL`**, porque falta bajar sus pseudoaccesos a memoria en el backend. No debe afirmarse que el flujo completo de spilling IR emite un `.bin` funcional. Existe también una opción `--spill` que habilita un mecanismo del backend tradicional desde AST; no confundir ambas rutas.
+**Restricción:** los accesos ya pueden traducirse, pero falta un test integrado que fuerce spilling a partir de un `.e` y compruebe un resultado correcto después de compilar, ensamblar y ejecutar en el entorno VLIW. No corresponde afirmar cumplimiento extremo a extremo únicamente con la presencia de esta implementación.
 
-## 3.7 Loop unrolling
+**Validación existente:** `prueba_spill_transform.c`, `prueba_grafo_interferencia.c` y `prueba_integracion_opt_ir.c` pasaron. La prueba de backend IR disponible actualmente cubre diez casos funcionales, pero **no prueba específicamente los slots `cdff_spill_area`**.
 
-**Archivos:** `loop_unrolling.c/.h` y `pruebas/test_loop_unrolling.c`.
+## 3.8 Integración con el backend VLIW
 
-**Objetivo:** desenrollar cuerpos de ciclos reconocidos con factor configurable, copiando operaciones y renombrando los temporales generados en cada copia.
+El procesador utiliza bundles de 128 bits con cuatro slots de 32 bits: ALU, LSU, BRU y FEIST. El ensamblador se resuelve mediante `resolucion_etiquetas.c`, se empaqueta en `vliw_packer.c` y se codifica con `binario.c`; los slots vacíos utilizan ceros.
 
-**Configuración:** la CLI acepta factores de **2 a 16**. La estructura `LoopUnrollConfig` permite limitar el tamaño del cuerpo (valor predeterminado 32 instrucciones) y el crecimiento extra (valor predeterminado 256 instrucciones).
+En `parser.y`, sin `--codegen-ir` se mantiene el backend tradicional desde AST. Con `--codegen-ir` se reconstruye una IR desde el AST, se aplican las fases solicitadas y `codegen_ir_generar_archivo()` produce ASM. Las fases de análisis IR que se muestran al usuario no se reutilizan por referencia; el backend vuelve a generar y optimizar su propia copia.
 
-**Precondiciones y heurística:** se reconoce una forma simple de ciclo presente en el IR y se exige un salto de regreso válido en el CFG. Se rechazan cuerpos con saltos internos u operaciones con efectos no contemplados, temporales que escaparían de forma insegura o un crecimiento excesivo. Se pueden omitir ciclos cortos reconocidos cuando el factor no aporta beneficio.
-
-**Ejemplo conceptual:** un ciclo que suma valores puede agrupar varias iteraciones en el mismo cuerpo transformado, manteniendo controles de salida para no alterar el resultado.
-
-**Validación disponible:** `make test-loop-unrolling`, que ejecuta verificaciones de equivalencia.
-
-**Limitación actual de CLI:** `--unroll N` exige `--ir-cfg`. Ese modo imprime el IR/CFG transformado, pero no entra en la ruta de generación de ensamblador del mismo llamado. Por otra parte, `--codegen-ir` reconstruye el IR desde el AST sin pasar por `loop_unroll()`. Falta integrar el IR desenrollado con el backend definitivo.
-
-## 3.8 Relación con VLIW
-
-El procesador cuenta con cuatro slots de 32 bits: ALU, LSU, BRU y FEIST. El backend dispone de módulos de calendarización, resolución de etiquetas y empaquetamiento. La representación binaria de un bundle de 128 bits respeta el orden de slots descrito en el README histórico del repositorio.
-
-Una optimización correcta del IR no garantiza automáticamente una mejora de ciclos. Debe además verificarse que la secuencia producida respete dependencias entre bundles, latencias y comportamiento del hardware, y medir el resultado con un benchmark representativo.
+**El comportamiento correcto del código generado y su mejora de rendimiento requieren validación adicional** con los benchmarks y la implementación RTL de Arquitectura de Computadores I. Una reducción de instrucciones IR no es una prueba directa de reducción de ciclos, misses o energía.

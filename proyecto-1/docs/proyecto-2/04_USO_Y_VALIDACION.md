@@ -1,87 +1,96 @@
-# 4. Instrucciones de uso y validación
+# 4. Uso del proyecto y resultados de validación
 
-## 4.1 Requisitos en WSL
+## 4.1 Compilar desde WSL
 
-Desde una terminal Ubuntu/WSL:
+Desde una distribución Ubuntu en WSL:
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential flex bison make python3 graphviz
 ```
 
-Situarse en la raíz del repositorio (`CompiladoresIIS2026`) y construir:
+Entrar **desde la raíz del repositorio**:
 
 ```bash
 cd proyecto-1/src
-make
+make rebuild
 ./cdff --help
 ```
 
-## 4.2 Operaciones principales de CDFF
+Para los pasos siguientes, permanecer en `proyecto-1/src`. Evitar guardar resultados generados en `main` sin revisar el `.gitignore`.
+
+## 4.2 Ejemplos con el código actualizado
 
 ```bash
-# Compilación tradicional desde AST
+# Compilación con el backend tradicional (desde AST)
 ./cdff factorial.e
 
-# Inspeccionar IR
+# Obtener IR sin optimizaciones
 ./cdff --emit-ir factorial.e
 
-# Analizar bloques básicos y CFG
-./cdff --ir-cfg factorial.e
+# Inspeccionar CFG (esta ejecución no produce el ensamblador final)
+./cdff --ir-cfg pruebas/prueba_ir_cfg.e
 
-# DCE y visualización de IR
-./cdff --dce --emit-ir factorial.e
+# DCE con impresión del IR
+./cdff --emit-ir --dce factorial.e
 
-# Renombrar y reordenar (ruta de análisis)
-./cdff --renombrar-ir --reordenar-ir --emit-ir factorial.e
+# Renombramiento y reordenamiento en IR
+./cdff --emit-ir --renombrar-ir --reordenar-ir factorial.e
 
-# Probar loop unrolling; aún es ruta de análisis, no binario optimizado
-./cdff --ir-cfg --unroll 4 pruebas/prueba_unroll_12.e
+# Desenrollamiento de factor cuatro, sin exigir --ir-cfg
+./cdff --emit-ir --unroll 4 pruebas/prueba_unroll_12.e
 
-# Backend desde IR (sin spilling IR)
-./cdff --codegen-ir --dce factorial.e
+# Generar ensamblador y binario desde IR con unrolling
+./cdff --codegen-ir --unroll 4 -s pruebas/prueba_unroll_12.e
 
-# Conserva ASM final y muestra bundles
-./cdff -s -p factorial.e
+# Solicitar transformación de spilling desde IR
+./cdff --codegen-ir --spill-ir -s pruebas/prueba_spill_backend.e
+
+# Solicitar las cinco fases IR (factor 2 por defecto)
+./cdff --codegen-ir --opt-ir -s factorial.e
+
+# Solicitar las cinco fases IR con factor explícito
+./cdff --codegen-ir --opt-ir --unroll 4 -s factorial.e
 ```
 
-**No usar como demostración de integración final:** `./cdff --codegen-ir --opt-ir ...` porque `--opt-ir` incluye spilling IR y ese backend lo rechaza actualmente. `--spill-ir` y `--spill` tampoco deben presentarse como spilling IR plenamente traducido hasta código máquina.
+**Importante:** los comandos son formas admitidas según el parser del código recibido. La ejecución completa de los últimos cuatro ejemplos, con verificación del valor calculado y del resultado RTL, todavía **no se ha certificado** en esta revisión. Por ello deben ejecutarse en la WSL del equipo y registrarse sus salidas reales. La existencia de `pruebas/prueba_spill_backend.e` no equivale a prueba aprobada de esa ruta.
 
 ### Banderas relevantes
 
-| Bandera | Función observada |
+| Opción | Comportamiento del código actual |
 |---|---|
-| `--emit-ir` | Muestra la representación intermedia con marcadores para el IDE. |
-| `--ir-cfg` | Muestra bloques básicos/CFG, sin entrar a emisión final de ASM en esta ruta. |
-| `--dce` | Solicita eliminación de código muerto en IR. |
-| `--renombrar-ir` | Solicita renombramiento sobre IR. |
-| `--reordenar-ir` | Solicita reordenamiento sobre IR. |
-| `--spill-ir` | Solicita transformación de spilling IR. |
-| `--spill` | Activa spilling en backend AST y también selecciona fase IR. |
-| `--opt-ir` | Solicita DCE, renombramiento, reordenamiento y spilling IR. |
-| `--unroll N` | Factor 2–16; requiere `--ir-cfg` en esta versión. |
-| `--codegen-ir` | Selecciona backend alternativo basado en IR. |
-| `-s`, `-p`, `-o` | Conserva ASM, imprime paquetes, configura archivo de salida. |
+| `--emit-ir` | Muestra la IR entre marcadores, útil para el IDE. |
+| `--ir-cfg` | Analiza/imprime el CFG; suspende el recorrido de codegen final. |
+| `--dce` | Activa DCE en la IR. |
+| `--renombrar-ir` | Activa renombramiento de instrucciones. |
+| `--reordenar-ir` | Activa reordenamiento seguro. |
+| `--spill-ir` | Activa la fase de spilling IR. |
+| `--spill` | Habilita spilling AST y solicita también spilling IR. |
+| `--unroll N` | Activa unrolling con `N` entre 2 y 16. Ya **no requiere** `--ir-cfg`. |
+| `--opt-ir` | Activa unrolling, DCE, renombramiento, reordenamiento y spilling. Factor de unrolling 2 si no se fija otro. |
+| `--codegen-ir` | Selecciona backend desde IR; las optimizaciones IR solicitadas se aplican antes de emitir ASM. |
+| `-s` | Conserva ensamblador final. |
+| `-p` | Muestra los paquetes VLIW generados. |
+| `-o archivo.bin` | Selecciona el nombre de archivo binario. |
+| `-x archivo.asm` | Ensambla directamente un archivo ASM. |
+
+**Inconsistencia menor del código:** el texto de `--help` en `parser.y` todavía afirma `--unroll N ... (requiere --ir-cfg)`. La validación que imponía esa restricción fue eliminada. Conviene corregir la ayuda antes de entregar.
 
 ## 4.3 IDE web
 
-Desde la **raíz** del repositorio:
+Desde la raíz del repositorio:
 
 ```bash
 python3 ide/app.py
 ```
 
-Abrir en el navegador de Windows o WSL: `http://127.0.0.1:8877`.
+Abrir `http://127.0.0.1:8877`. El IDE ofrece editor de archivos, completado contextual LL(1) y de identificadores, diagnósticos y sugerencias de corrección, análisis de clones Tipo I/II y compilación mediante `cdff`.
 
-El IDE permite editar y guardar programas, compilar mediante `cdff`, consultar IR y resultados, proponer completados según contexto LL(1), reportar problemas sintácticos y detectar clones entre archivos. El parser LL(1) auxiliar del IDE es distinto del parser de producción Flex/Bison.
+En `ide/app.py`, el endpoint `/api/compile` lanza `cdff -s --emit-ir -o ... archivo.e`, **sin agregar `--opt-ir` o `--codegen-ir`** por sí solo. Por tanto, la compilación del IDE debe distinguirse de las pruebas de optimizaciones en la terminal.
 
-La ruta `/api/compile` ejecuta actualmente `cdff -s --emit-ir -o ...` **sin activar automáticamente las optimizaciones**. Por ello, una compilación desde la interfaz no equivale a probar las cuatro optimizaciones.
+## 4.4 Pruebas ejecutables
 
-El IDE tiene su propia documentación técnica en `ide/README.md`, `ide/DEFENSA_LL1.md` y `ide/CORRECCIONES_Y_CLONES.md`.
-
-## 4.4 Comandos para pruebas
-
-Desde `proyecto-1/src`:
+En `proyecto-1/src`:
 
 ```bash
 make test-loop-unrolling
@@ -89,7 +98,7 @@ make test-opt-modulos
 bash probar_codegen_ir_backend.sh
 ```
 
-Desde la raíz del repositorio:
+En la raíz del repositorio:
 
 ```bash
 python3 ide/tests/test_ll1.py
@@ -99,38 +108,38 @@ python3 ide/tests/test_clones.py
 python3 ide/tests/test_symbol_completion.py
 ```
 
-Para compilar todo el frontend se requieren `flex` y `bison`. Para pruebas RTL se necesita, además, el proyecto de Arquitectura y las dependencias de simulación.
+El Makefile ofrece asimismo `make test-codegen-ir-backend`, que intenta ejecutar el script directamente. En copias ZIP sin permiso ejecutable puede fallar por permisos; usar `bash probar_codegen_ir_backend.sh` o asegurar el bit ejecutable en Git.
 
-**Detalle de permisos:** en la extracción ZIP utilizada para esta revisión, `make test-codegen-ir-backend` falló al intentar ejecutar `probar_codegen_ir_backend.sh` sin permiso de ejecución. El mismo script **sí pasó** usando `bash probar_codegen_ir_backend.sh`. Verificar en WSL si el script conserva el bit ejecutable antes de usar el objetivo `make`.
+## 4.5 Resultados de esta revisión
 
-## 4.5 Evidencia de validación del avance recibido
+**Fuente de la revisión:** ZIP recibido el 22 de noviembre de 2026, con los archivos internos fechados el 23 de noviembre a las 01:15 UTC. **Los resultados se obtuvieron localmente en una copia extraída de ese ZIP**, no en `main` ni en la WSL del equipo.
 
-Se ejecutaron las siguientes pruebas sobre la copia extraída del ZIP del **22 de noviembre de 2026**, en un entorno GNU/Linux, sin modificar el código fuente. No se afirma que esos resultados correspondan a commits posteriores.
-
-| Prueba ejecutada | Resultado de esta revisión | Alcance |
+| Prueba | Resultado | Qué comprueba |
 |---|---|---|
-| `make test-loop-unrolling` | PASS | Transformación y equivalencia de resultados. |
-| `make test-opt-modulos` | PASS | Integración IR, spilling, grafo de interferencia, renombramiento, reordenamiento y regresiones DCE. |
-| `bash probar_codegen_ir_backend.sh` | PASS | Diez pruebas del backend IR y resolución de etiquetas, con simulación ASM del propio script. |
-| `python3 ide/tests/test_ll1.py` | PASS (13 pruebas) | Predicción sintáctica y gramática auxiliar LL(1). |
-| `python3 ide/tests/test_ide.py` | PASS (9 pruebas) | API y comportamiento de edición/diagnóstico. |
-| `python3 ide/tests/test_correcciones_matriz.py` | PASS (9 pruebas) | Correcciones y casos conservadores. |
-| `python3 ide/tests/test_clones.py` | PASS (6 pruebas) | Clones Tipo I/II y falsos positivos. |
-| `python3 ide/tests/test_symbol_completion.py` | PASS (12 pruebas) | Completado de identificadores. |
-| `make test-codegen-ir-backend` | No ejecutó el script | Permiso de ejecución faltante en la copia ZIP; el script pasó invocando `bash`. |
+| `make test-loop-unrolling` | **PASS** | Equivalencia IR, varios valores de N/factor y rechazos seguros. |
+| `make test-opt-modulos` | **PASS** | Pruebas del coordinador, grafo/spill, renombramiento, reordenamiento y DCE. |
+| `bash probar_codegen_ir_backend.sh` | **PASS** | Diez escenarios del backend IR, comparación mediante simulador ASM y resolución de etiquetas. |
+| `python3 ide/tests/test_ll1.py` | **PASS: 13 pruebas** | Análisis LL(1) auxiliar. |
+| `python3 ide/tests/test_ide.py` | **PASS: 9 pruebas** | API/operaciones del IDE. |
+| `python3 ide/tests/test_correcciones_matriz.py` | **PASS: 9 pruebas** | Diagnósticos y correcciones. |
+| `python3 ide/tests/test_clones.py` | **PASS: 6 pruebas** | Clones y falsos positivos. |
+| `python3 ide/tests/test_symbol_completion.py` | **PASS: 12 pruebas** | Completado de identificadores. |
+| `make rebuild` | **NO COMPLETADO POR ENTORNO** | Faltan los ejecutables `bison` y `flex` en el entorno de esta revisión. No se llegó a compilar el parser completo. |
 
-Los programas del backend IR que reportaron PASS fueron: factorial, `para`, `mientras`, condicional, aritmética, comparaciones, factorial recursivo, lista como parámetro y dos casos derivados de AST (`ast_factorial`, `ast_para`). La simulación del script **no sustituye** la ejecución RTL en el procesador VLIW con cachés.
+Las diez pruebas del script backend IR son: `factorial`, `para`, `mientras`, `condicional`, `aritmetica`, `comparaciones`, `factorial_recursivo`, `lista_parametro`, `ast_factorial` y `ast_para`.
 
-## 4.6 Mediciones comparativas pendientes
+**Alcance de los PASS:** las pruebas pasan para los casos incluidos. No prueban, por sí mismas, un archivo `.e` con las **cinco fases IR** hasta ejecución sobre la implementación RTL ni prueban de manera aislada el soporte nuevo de `cdff_spill_area` en el backend. Ese estado se mantiene como pendiente en la sección 7.
 
-El enunciado solicita resultados gráficos por prueba. La siguiente tabla es **una plantilla, no datos observados**:
+## 4.6 Registro requerido de métricas
 
-| Benchmark | Optimización | Instrucciones antes/después | Código (bytes) | Ciclos estimados | Tiempo de compilación | Eliminadas/reordenadas/renombradas |
-|---|---|---|---|---|---|---|
-| Por definir | Sin optimizar | Pendiente | Pendiente | Pendiente | Pendiente | No aplica |
-| Por definir | DCE | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| Por definir | Loop unrolling | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| Por definir | Reordenamiento | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
-| Por definir | Spilling | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+La especificación exige medir para cada programa antes/después: instrucciones, tamaño del código en bytes, ciclos estimados, tiempo de compilación e instrucciones eliminadas, reordenadas o renombradas. El grupo también debe contrastar los resultados con ciclos y comportamiento de memoria en la arquitectura.
 
-**Pendientes para la evidencia de defensa:** comprobar al menos tres programas por cada categoría exigida por la sección 6 de la especificación, registrar métricas comparables y validar la ejecución sobre la arquitectura real del grupo.
+| Programa | Fase | Inst. antes | Inst. después | Tamaño ASM/bin (bytes) | Ciclos estimados | Tiempo de compilación | Transformaciones |
+|---|---|---:|---:|---:|---:|---:|---|
+| [programa 1] | Sin optimizar | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | No aplica |
+| [programa 1] | DCE | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| [programa 1] | Unrolling | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| [programa 2] | Reordenamiento | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+| [programa 3] | Spilling | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente | Pendiente |
+
+Esta tabla es una **plantilla de recolección**, no presenta resultados inventados. Para interpretar los datos, usar el mismo programa de entrada, el mismo hardware/simulador y las mismas condiciones de medición, cambiando solamente las fases que se comparan.

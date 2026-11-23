@@ -1,34 +1,50 @@
-# Documentación del Proyecto Grupal II — CE1108
+# Proyecto Grupal II — Documentación técnica de Compiladores e Intérpretes
 
-**Instituto Tecnológico de Costa Rica · Compiladores e Intérpretes · II semestre de 2026**
+**Instituto Tecnológico de Costa Rica · CE1108 · II semestre de 2026**
 
-Este directorio documenta el estado del compilador **CDFF** y su IDE en el último avance disponible. El Proyecto Grupal II se desarrolla conjuntamente con Arquitectura de Computadores I, cuyo procesador VLIW ejecuta los programas generados por el compilador.
+Esta documentación describe la implementación disponible del compilador **CDFF**, su IDE y su integración con un backend VLIW. Está redactada a partir del último ZIP recibido el **22 de noviembre de 2026** (archivos internos con fecha del 23 de noviembre de 2026 a las 01:15 UTC), de la especificación oficial del Proyecto Grupal II y de pruebas ejecutadas sobre esa misma copia del código.
 
-## Documentos
+## Índice
 
-| Documento | Contenido |
+| Documento | Tema |
 |---|---|
-| [01 — Introducción y ambiente](01_INTRODUCCION_AMBIENTE.md) | Contexto, objetivos, herramientas y estructura del repositorio. |
-| [02 — Diseño y diagramas](02_DISENO_DIAGRAMAS.md) | Arquitectura del software, relaciones UML y flujo de funcionalidades. |
-| [03 — Optimizaciones](03_OPTIMIZACIONES.md) | IR, CFG, DCE, renombramiento, reordenamiento, loop unrolling y spilling. |
-| [04 — Uso y validación](04_USO_Y_VALIDACION.md) | Comandos de WSL, flags, IDE y resultados reproducibles de pruebas. |
-| [05 — Atributos CI y PM](05_ATRIBUTOS_CI_PM.md) | Preguntas y respuestas requeridas por el enunciado. |
-| [06 — Bitácora y cierre](06_BITACORA_CIERRE.md) | Bitácora por integrante, conclusiones provisionales, recomendaciones y referencias. |
-| [07 — Pendientes](07_PENDIENTES.md) | Aspectos aún no terminados ni validados de extremo a extremo. |
+| [01 — Introducción y ambiente](01_INTRODUCCION_AMBIENTE.md) | Contexto, objetivos y herramientas. |
+| [02 — Diseño y diagramas](02_DISENO_DIAGRAMAS.md) | Arquitectura del compilador, UML y funcionalidades del IDE. |
+| [03 — IR y optimizaciones](03_OPTIMIZACIONES.md) | CFG, DCE, renombramiento, reordenamiento, spilling y loop unrolling. |
+| [04 — Uso y validación](04_USO_Y_VALIDACION.md) | Comandos WSL, banderas, pruebas realmente ejecutadas y tablas para métricas. |
+| [05 — Atributos CI y PM](05_ATRIBUTOS_CI_PM.md) | Preguntas y respuestas exigidas por el profesor. |
+| [06 — Bitácora y cierre](06_BITACORA_CIERRE.md) | Horas por integrante por completar, conclusiones, recomendaciones y referencias. |
+| [07 — Pendientes](07_PENDIENTES.md) | Validaciones y evidencias que aún hacen falta. |
+| [08 — Cambios del avance](08_CAMBIOS_AVANCE.md) | Comparación puntual de los seis archivos cambiados y trazabilidad de las pruebas. |
 
-Se incluyen diagramas fuente en [`diagramas/`](diagramas/), editables con PlantUML.
+Los fuentes editables de diagramas UML se encuentran en [diagramas/](diagramas/).
 
-## Alcance y criterio de documentación
+## Estado de esta revisión
 
-Se documenta **lo que aparece en el código** y lo que se comprobó mediante pruebas locales, sin dar por completadas funciones pendientes. La presencia de una función o un test unitario no equivale a integración con el procesador VLIW ni a cumplimiento de todos los escenarios de la defensa.
+Las cinco fases IR están integradas en el coordinador: **Loop Unrolling → DCE → Renombramiento → Reordenamiento → Spilling**. El código más reciente también añadió al backend IR la reserva de slots internos de spilling y su traducción a instrucciones de memoria. Las pruebas modulares y las diez pruebas autónomas del backend pasaron, junto con 49 pruebas Python del IDE.
 
-En particular, el pipeline de optimizaciones IR está implementado y tiene pruebas locales satisfactorias, pero el backend IR aún rechaza **spilling IR**; la ruta de `--unroll` exige `--ir-cfg` y no está conectada a la generación final de código máquina. Estos límites están detallados en los documentos 03 y 07.
+**Esto no implica que la integración final en RTL esté comprobada.** Falta generar y ejecutar programas de demostración de las cinco fases desde archivos fuente `.e`, registrar las métricas y completar la bitácora real. Además, en el entorno de análisis utilizado faltaba `bison`, por lo que `make rebuild` no pudo completarse aquí.
 
-> **Para completar antes de entregar:** identificar autores del grupo, agregar horas reales, ejecutar pruebas en la versión final del repositorio, obtener mediciones comparativas y completar la integración pendiente con Arquitectura.
+## Cómo agregar esta carpeta al repositorio desde WSL
 
-## Base documental
+Este ZIP contiene únicamente la ruta `proyecto-1/docs/proyecto-2/`; no reemplaza archivos `.c`, `.h`, `parser.y` ni `Makefile`.
 
-- Código fuente disponible en `proyecto-1/src/`.
-- Implementación del IDE en `ide/`.
-- Especificación oficial **Proyecto Grupal II: Análisis de Impacto de Memoria Caché y Optimizaciones de Compilador en Procesador Propio tipo VLIW**, CE4301/CE1108, II semestre de 2026.
-- Documentación del proyecto anterior en `proyecto-1/docs/` y `README.md`.
+Desde la raíz de un clon actualizado y **sin cambios locales pendientes**, descomprimir el ZIP descargado:
+
+```bash
+unzip '/mnt/c/Users/TU_USUARIO/Downloads/documentacion_compiladores_actualizada.zip' -d .
+git status --short
+git add proyecto-1/docs/proyecto-2
+git diff --cached --stat
+git commit -m 'docs: actualizar documentacion del Proyecto II con integracion IR'
+git push origin main
+```
+
+La ruta de Descargas debe ajustarse al nombre real del usuario de Windows. Antes de hacer `git pull --ff-only origin main`, confirmar que está en la rama correcta y que no haya trabajo sin guardar o cambios del equipo por integrar. Si el repositorio requiere pull request, respetar ese flujo en vez de hacer push directo.
+
+## Fuente y límites de verificación
+
+- Especificación oficial del Proyecto Grupal II de CE1108/CE4301, II semestre 2026.
+- Archivos de `proyecto-1/src/`, `ide/` y documentación existente del repositorio.
+- Pruebas realizadas localmente sobre la copia recibida, **no** sobre el hash final de `main`.
+- Los marcadores como `[Nombre]`, `[Horas]` y `Pendiente` deben completarse con información real del grupo; no se inventaron resultados ni nombres de otros integrantes.

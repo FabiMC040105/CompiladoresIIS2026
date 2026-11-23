@@ -6,24 +6,30 @@ El sistema tiene dos componentes principales: el compilador y el IDE web. El com
 
 ```mermaid
 flowchart TD
-    S[Programa fuente .e] --> LX[Lexer Flex]
-    LX --> PS[Parser Bison y AST]
-    PS --> SEM[Análisis semántico y tabla de símbolos]
-    SEM --> IR[Generación de IR de tres direcciones]
-    IR --> CFG[Bloques básicos y CFG]
-    CFG --> OPT[Optimizaciones IR]
-    OPT --> VIS[Impresión de IR y estadísticas]
-    SEM --> CL{Backend solicitado}
-    CL -->|Predeterminado| ASTBACK[Generación ASM desde AST]
-    CL -->|--codegen-ir| IRBACK[Regeneración IR y optimizaciones admitidas]
-    IRBACK --> IRGEN[Generación ASM desde IR]
-    ASTBACK --> LABEL[Resolución de etiquetas]
-    IRGEN --> LABEL
-    LABEL --> BUNDLE[Empaquetamiento VLIW]
-    BUNDLE --> BIN[Codificación y archivo .bin]
+    FU[Archivo fuente .e] --> LEX[Lexer Flex + parser Bison]
+    LEX --> AST[AST + tabla de símbolos]
+    AST --> SEM[Análisis semántico]
+    SEM --> IR{Se solicita IR, CFG u optimización?}
+    IR -->|Sí| IR1[Generar IR para inspección]
+    IR1 --> OPT1[Aplicar fases seleccionadas]
+    OPT1 --> MOSTRAR[Mostrar IR y/o CFG]
+    MOSTRAR --> CFGSTOP{--ir-cfg?}
+    CFGSTOP -->|Sí| FINCFG[Finaliza sin ensamblar]
+    CFGSTOP -->|No| BE{--codegen-ir?}
+    IR -->|No| BE
+    BE -->|No| ASTBE[Backend AST tradicional]
+    BE -->|Sí| IR2[Regenerar IR desde AST]
+    IR2 --> OPT2[Aplicar las mismas fases IR]
+    OPT2 --> IRBE[codegen_ir.c: ASM desde IR]
+    ASTBE --> ET[Resolver etiquetas]
+    IRBE --> ET
+    ET --> PACK[Empaquetar slots VLIW]
+    PACK --> BIN[Generar .bin]
 ```
 
-**Nota sobre el diagrama:** el recorrido `IR → OPT → VIS` y la selección de backend están separados intencionalmente. El IR utilizado para mostrar el CFG se libera y el backend IR vuelve a construirlo. Por ello, `--unroll` actualmente **no llega a la generación del `.bin`**, y el backend IR rechaza `OPT_IR_SPILL`.
+**Distinción importante:** en `parser.y` hay una IR para inspección y otra generada de nuevo cuando se selecciona `--codegen-ir`. Ambas se optimizan con `opt_ir_aplicar_config()`, por lo que `--unroll` y `--spill-ir` **sí llegan al backend IR** en esta revisión. Sin `--codegen-ir`, las fases de optimización IR no sustituyen al backend tradicional; la bandera `--spill` además habilita un mecanismo propio del backend AST. `--ir-cfg` imprime el CFG y termina sin emitir ensamblador, según la lógica actual.
+
+**Límite de la verificación:** comprobar que el backend admite la transformación no significa que se haya validado un programa real ejecutando las cinco fases simultáneamente en RTL. Ese paso sigue pendiente.
 
 ## 2.2 Organización de módulos
 
@@ -78,6 +84,7 @@ classDiagram
       +renombramiento
       +reordenamiento
       +spilling
+      +unrolling
     }
     class GrafoInterferencia {
       +nodos temporales

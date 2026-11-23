@@ -32,6 +32,7 @@ class OptIREstadisticas {
   +RenEstadisticas renombramiento
   +ReoEstadisticas reordenamiento
   +ResultadoSpill spilling
+  +LoopUnrollStats unrolling
 }
 IRProgram "1" *-- "0..*" IRInstruction
 IRProgram ..> BasicBlockCFG : bb_build()

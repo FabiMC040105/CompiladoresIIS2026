@@ -1,46 +1,57 @@
-# 7. Pendientes y comprobaciones antes de entrega
+# 7. Pendientes, riesgos y lista de validación
 
-Este listado distingue el funcionamiento que existe como **módulo/prototipo probado** de los requisitos de la entrega **totalmente integrada**. No sustituye una revisión del grupo sobre la última versión de `main`.
+La implementación del ZIP nuevo incorporó la integración de unrolling y el soporte de memoria para spilling IR. Estos puntos **ya no deben describirse como funcionalidades ausentes**. Queda pendiente demostrar su funcionamiento completo en los escenarios exigidos por la especificación.
 
-## 7.1 Integración técnica
+## 7.1 Validación técnica de extremo a extremo
 
-- [ ] **Loop unrolling al backend:** `--unroll N` actualmente requiere `--ir-cfg`, y esa ruta no genera ASM final. Conectar la transformación con la ruta de código máquina y verificar el resultado.
-- [ ] **Spilling IR al backend:** `--codegen-ir` rechaza `OPT_IR_SPILL`; implementar el descenso de `cdff_spill_area` a operaciones y direcciones de memoria válidas.
-- [ ] **Prueba completa de `--opt-ir`:** la máscara solicita DCE + renombramiento + reordenamiento + spilling. Demostrar un programa real que pase por todas y termine en binario ejecutable.
-- [ ] **Backend IR y ámbitos:** `parser.y` establece `codegen_resolver_ir_global`, que resuelve variables globales; validar y ampliar los casos de variables locales y parámetros antes de afirmar compatibilidad total.
-- [ ] **Integración con VLIW:** ejecutar el binario optimizado en la implementación real del procesador, no solo en pruebas de IR ni en el simulador abstracto de ASM.
-- [ ] **Calendarización y NOPs:** verificar el manejo de dependencias RAW y de control entre bundles, sin atribuir al hardware forwarding o scoreboarding inexistentes.
-- [ ] **Corregir/comprobar permiso del script:** si `make test-codegen-ir-backend` falla por `Permission denied`, revisar `chmod +x` y el bit de ejecución registrado en Git.
+- [ ] Ejecutar `make rebuild` en la WSL del equipo con Flex y Bison instalados; registrar resultado y versión de herramientas.
+- [ ] Corregir la ayuda de `--unroll` en `parser.y`: ya no requiere `--ir-cfg`.
+- [ ] Compilar un programa `.e` con `--codegen-ir --unroll 4`, comprobar que hay un ciclo realmente desenrollado y validar el valor ejecutado, no solo que aparezca la opción.
+- [ ] Compilar un programa con presión suficiente para crear `cdff_spill_area`, comprobar direcciones, `LOAD/STORE`, integridad de memoria y equivalencia de resultados frente a una referencia sin optimizar.
+- [ ] Ejecutar un programa que ejercite efectivamente **las cinco fases** de `--opt-ir`, confirmando sus contadores y comparando el resultado con el código sin optimizar.
+- [ ] Verificar si el backend IR resuelve correctamente los **ámbitos locales y parámetros** de programas reales complejos. El parser configura `codegen_resolver_ir_global` y los tests independientes inyectan un resolvedor específico: ambos hechos no garantizan la misma cobertura.
+- [ ] Comprobar dependencias, calendarización y NOPs entre bundles en el procesador VLIW. No asumir forwarding ni scoreboarding del hardware.
+- [ ] Ejecutar binarios optimizados en la simulación RTL con cachés L1-D/L2 y comparar resultados con un oráculo.
+- [ ] Comprobar que el script `probar_codegen_ir_backend.sh` puede ejecutarse mediante `make test-codegen-ir-backend` o documentar la invocación por `bash`.
+- [ ] Actualizar comentarios de `parser.y`, `optimizaciones_ir.h` y `spill_transform.h` que todavía describen como futuras o no conectadas partes de la integración ya implementadas.
 
-## 7.2 Casos mínimos del enunciado
+## 7.2 Casos mínimos que exige el profesor
 
-La sección 6 solicita, al menos:
+La sección 6 del enunciado pide **al menos 15 programas representativos**, no solamente 15 aserciones dentro de pruebas C:
 
-- [ ] Tres programas de loop unrolling: N constante, N variable pequeño y N grande.
-- [ ] Tres programas con dependencias que obliguen a renombramiento WAR/WAW.
-- [ ] Tres programas con código muerto mezclado con llamadas con efectos.
-- [ ] Tres programas con saltos condicionales y funciones para comprobar reordenamiento seguro.
-- [ ] Tres programas que verifiquen spilling de registros.
-- [ ] Verificar que esos escenarios estén cubiertos mediante **programas representativos** y que puedan demostrarse aisladamente. Tener numerosas aserciones en una prueba C no demuestra por sí solo los programas de entrada solicitados.
+- [ ] Tres para Loop Unrolling: N constante, N variable pequeño y N grande.
+- [ ] Tres con dependencias WAR/WAW que requieran renombramiento.
+- [ ] Tres con código muerto mezclado con llamadas con efectos.
+- [ ] Tres con saltos condicionales y funciones para reordenamiento seguro.
+- [ ] Tres que verifiquen spilling de registros.
 
-## 7.3 Evidencia cuantitativa y documentación
+Para cada programa se debe registrar entrada, salida esperada, comando de ejecución, resultado, evidencia y métricas. La cobertura actual de pruebas modulares es una base, pero todavía hay que vincularla a este conjunto evaluable.
 
-- [ ] Medir por prueba instrucciones antes/después, tamaño de código, ciclos estimados, tiempo de compilación y número de eliminadas/reordenadas/renombradas.
-- [ ] Preparar gráficas y comparaciones entre configuraciones, sin inventar cifras.
-- [ ] Contrastar el efecto de optimizaciones con métricas del procesador/cachés cuando la integración esté disponible.
-- [ ] Completar la bitácora de los cuatro integrantes con actividades, fechas, horas reales y totales.
-- [ ] Incorporar integrantes, repositorio y hash final; revisar ortografía y referencias.
-- [ ] Actualizar tablas de estado y conclusiones tras corregir el backend.
-- [ ] Exportar un PDF final si el formato de entrega por TEC Digital así lo requiere, conservando los diagramas y la pregunta/respuesta de atributos.
+## 7.3 Documentación y evidencia cuantitativa
 
-## 7.4 Riesgos conocidos del estado observado
+- [ ] Obtener conteos antes/después, bytes, ciclos estimados, tiempo de compilación y número de instrucciones eliminadas/reordenadas/renombradas.
+- [ ] Generar gráficas comparativas. Si se usan métricas de RTL, indicar configuración y versión del procesador.
+- [ ] Completar bitácora real de los cuatro integrantes, con fechas, actividades y total de horas.
+- [ ] Completar nombres de autores, enlace del repositorio y hash del commit final de `main`.
+- [ ] Revisar los diagramas contra la integración final de hardware y software.
+- [ ] Preparar demostración final del IDE y compilación optimizada por terminal, distinguiendo sus rutas.
 
-| Hallazgo | Evidencia observada | Consecuencia documental |
+## 7.4 Matriz de estado a la fecha del ZIP
+
+| Componente | Estado observado | Evidencia / reserva |
 |---|---|---|
-| `--unroll` no llega a ASM final | Validación de flags y liberación del IR en `parser.y`. | Mostrarlo como transformación IR, no como binario optimizado. |
-| `--codegen-ir` rechaza spilling | Mensaje explícito en `parser.y`. | No afirmar soporte end-to-end para `--opt-ir`. |
-| IDE compila sin optimizaciones | Ruta `/api/compile` en `ide/app.py`. | No presentar clic en «Compilar» como prueba de optimizaciones activas. |
-| Resultados de pruebas aisladas | Testbenches C, Python y script de simulación ASM. | Registrar pruebas por separado de la simulación RTL VLIW. |
-| Falta medición comparativa consolidada | No se encontró una tabla de benchmark final en los archivos revisados. | Mantener tablas de rendimiento como pendientes. |
+| AST, IR y CFG | Implementados | Código y pruebas existentes. |
+| DCE | Implementado y probado modularmente | Pruebas de regresión PASS. |
+| Renombramiento | Implementado y probado modularmente | Pruebas PASS. |
+| Reordenamiento | Implementado y probado modularmente | Pruebas PASS. |
+| Loop Unrolling | Conectado al coordinador IR | Pruebas aisladas PASS; falta demostrar todo el recorrido CLI → RTL. |
+| Spilling IR | Conectado al coordinador IR | Grafo, recoloreo y reescritura PASS. |
+| Spilling al ensamblador IR | **Código incorporado** | `codegen_ir.c` detecta slots y emite LOAD/STORE; falta prueba dedicada integrada. |
+| Backend IR general | Pruebas autónomas PASS | Diez escenarios en simulador ASM; no representan RTL con cachés. |
+| IDE y LL(1) | Pruebas automáticas PASS | 49 pruebas Python ejecutadas. |
+| Compilación completa del frontend | No comprobada en esta revisión | Entorno de análisis sin `bison`/`flex`. |
+| Benchmarks comparativos | Pendientes | Sin resultados medidos provistos para esta actualización. |
 
-Para comprobar nuevos cambios, repetir las pruebas de [04 — Uso y validación](04_USO_Y_VALIDACION.md) y anotar el hash y la fecha de ejecución.
+## 7.5 Observación sobre `--opt-ir`
+
+`OPT_IR_TODAS` ya contempla las cinco fases. Sin embargo, varias pruebas existentes invocan el coordinador con un programa **sin ciclos reconocibles**, por lo que superar la prueba no certifica que ocurra un desenrollamiento efectivo. También se deben diferenciar casos donde spilling no fue necesario de los que obligan a insertar `LOAD/STORE`. La defensa debe demostrar al menos una transformación real de cada tipo.
