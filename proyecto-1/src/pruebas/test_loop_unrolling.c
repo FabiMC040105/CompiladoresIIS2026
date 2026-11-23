@@ -141,7 +141,9 @@ static void test_equivalent(long n, int variable_bound, unsigned factor, int sho
     assert(run_program(&original) == expected);
     assert(loop_unroll(&original, &optimized, &cfg, &stats) == 1);
     /* Los ciclos constantes de 0 o 1 vueltas se dejan como estaban */
-    int should_unroll = variable_bound || n >= (long)factor;
+    int should_unroll = !variable_bound &&
+                        n >= (long)factor * 3L &&
+                        n % (long)factor == 0;
 
     assert(stats.loops_found == 1);
     assert(stats.loops_unrolled == (size_t)should_unroll);
@@ -195,6 +197,10 @@ int main(void)
     test_equivalent(1, 0, 4, 0);    /* Solo una iteracion */
     test_equivalent(6, 0, 2, 1);    /* Factor 2 y limite constante */
     test_equivalent(5, 1, 4, 0);    /* Limite en variable, queda sobrante */
+    test_equivalent(12, 0, 4, 0);   /* Camino rápido: 3 grupos de 4 */
+    test_equivalent(1000, 0, 4, 0); /* Camino rápido: 250 grupos de 4 */
+    test_equivalent(4, 0, 4, 0);
+    test_equivalent(8, 0, 4, 0);
     test_equivalent(13, 0, 4, 0);   /* No es multiplo de 4 */
     test_equivalent(1000, 1, 8, 0); /* Muchas iteraciones */
     test_unsafe_and_heuristic();    /* Casos que no quiero modificar */
