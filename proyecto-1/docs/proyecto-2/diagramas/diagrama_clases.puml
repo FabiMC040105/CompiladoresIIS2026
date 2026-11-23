@@ -1,0 +1,40 @@
+@startuml
+skinparam classAttributeIconSize 0
+class IRProgram {
+  +IRInstruction *instructions
+  +size_t count
+  +size_t capacity
+  +size_t next_temp
+  +size_t next_label
+}
+class IRInstruction {
+  +IROp op
+  +char *arg1
+  +char *arg2
+  +char *result
+  +char *extra
+  +int source_line
+  +NodoAST *nodo_origen
+}
+class BasicBlockCFG {
+  +BasicBlock[] blocks
+  +CFGEdge[] edges
+}
+class GrafoInterferencia {
+  +NodoInterferencia[] nodos
+  +matriz de adyacencia
+}
+class OptIREstadisticas {
+  +unsigned fases_ejecutadas
+  +size_t instrucciones_antes
+  +size_t instrucciones_despues
+  +ResultadoDCE dce
+  +RenEstadisticas renombramiento
+  +ReoEstadisticas reordenamiento
+  +ResultadoSpill spilling
+}
+IRProgram "1" *-- "0..*" IRInstruction
+IRProgram ..> BasicBlockCFG : bb_build()
+IRProgram ..> GrafoInterferencia : liveness / gi_construir()
+OptIREstadisticas ..> IRProgram : medicion de fases
+@enduml

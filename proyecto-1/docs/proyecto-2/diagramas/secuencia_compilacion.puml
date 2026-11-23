@@ -1,0 +1,15 @@
+@startuml
+actor Usuario
+participant "index.html" as Frontend
+participant "app.py" as Servidor
+participant "cdff" as Compilador
+database "workspace" as Workspace
+Usuario -> Frontend : Editar y compilar
+Frontend -> Servidor : POST /api/compile
+Servidor -> Workspace : Guardar archivo .e
+Servidor -> Compilador : cdff -s --emit-ir -o salida.bin archivo.e
+Compilador --> Servidor : Diagnosticos, IR y codigo de salida
+Servidor -> Workspace : Comprobar .asm y .bin
+Servidor --> Frontend : JSON (errores, IR, artefactos)
+Frontend --> Usuario : Mostrar resultados
+@enduml
