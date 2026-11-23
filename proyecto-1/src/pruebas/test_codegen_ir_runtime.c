@@ -1,6 +1,7 @@
 /* Prueba del backend IR sin Flex/Bison ni repositorio RTL.
    Construye los cuadruplos que genera ir_ast.c para ciclos y llamadas. */
 #include "../codegen_ir.h"
+#include "../spill_transform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -237,12 +238,61 @@ int main(int argc, char **argv) {
         EM(IR_ADD,"%t7","%t3","%t8"); EM(IR_ADD,"%t8","%t4","%t9");
         EM(IR_ADD,"%t9","%t5","%t10"); EM(IR_COPY,"%t10",NULL,"resultado");
         EM(IR_FUNC_END,NULL,NULL,"principal");
+    } else if (!strcmp(argv[1],"spill_chaitin")) {
+        EM(IR_FUNC_BEGIN,NULL,NULL,"principal");
+        EM(IR_COPY,"1",NULL,"%t0");
+        EM(IR_COPY,"2",NULL,"%t1");
+        EM(IR_COPY,"3",NULL,"%t2");
+        EM(IR_COPY,"4",NULL,"%t3");
+        EM(IR_COPY,"5",NULL,"%t4");
+        EM(IR_COPY,"6",NULL,"%t5");
+        EM(IR_COPY,"7",NULL,"%t6");
+        EM(IR_COPY,"8",NULL,"%t7");
+        EM(IR_COPY,"9",NULL,"%t8");
+        EM(IR_COPY,"10",NULL,"%t9");
+        EM(IR_ADD,"%t0","%t1","%t10");
+        EM(IR_ADD,"%t10","%t2","%t11");
+        EM(IR_ADD,"%t11","%t3","%t12");
+        EM(IR_ADD,"%t12","%t4","%t13");
+        EM(IR_ADD,"%t13","%t5","%t14");
+        EM(IR_ADD,"%t14","%t6","%t15");
+        EM(IR_ADD,"%t15","%t7","%t16");
+        EM(IR_ADD,"%t16","%t8","%t17");
+        EM(IR_ADD,"%t17","%t9","%t18");
+        EM(IR_COPY,"%t18",NULL,"resultado");
+        EM(IR_FUNC_END,NULL,NULL,"principal");
     } else { fprintf(stderr,"Unknown test\n"); return 2; }
     CodegenIRConfig cfg = {0}; cfg.original.fin_globales =
         !strcmp(caso_actual,"lista_parametro") ? 16 : 0;
     cfg.resolver_ir = simbolo;
+
+    if (!strcmp(argv[1], "spill_chaitin")) {
+        ResultadoSpill spill = {0};
+        if (!spill_resolver_programa(&p, 9, 4, &spill) ||
+            spill.stores == 0 || spill.loads == 0) {
+            fprintf(stderr, "FAIL spilling Chaitin E2E\n");
+            ir_free(&p);
+            ast_liberar(raiz);
+            return 1;
+        }
+        printf("PASS spilling Chaitin: STORE=%zu LOAD=%zu slots=%zu\n",
+               spill.stores, spill.loads, spill.slots);
+    }
+
+    AsignacionRegistros mapa;
+    ar_init(&mapa);
+    if (!spill_asignacion_final(&p, 9, 4, &mapa)) {
+        fprintf(stderr, "FAIL asignacion Chaitin %s\n", argv[1]);
+        ar_free(&mapa);
+        ir_free(&p);
+        ast_liberar(raiz);
+        return 1;
+    }
+    cfg.asignacion_registros = &mapa;
+
     CodegenIREstadisticas stats={0};
     int ok=codegen_ir_generar_archivo(&p,argv[2],&cfg,&stats);
+    ar_free(&mapa);
     ir_free(&p);
     ast_liberar(raiz);
     if(!ok) { fprintf(stderr,"FAIL backend %s\n",argv[1]); return 1; }

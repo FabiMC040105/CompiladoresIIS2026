@@ -215,6 +215,31 @@ por dependencias de registros y emite NOPs cuando se requieren.
 Luego registra escrituras y agrega una barrera si una operacion modifica el PC.
 El empaquetamiento de varias FUs ocurre en una fase posterior del compilador.
 */
+/*
+ * Emite una etiqueta como frontera segura de bloque basico.
+ * El hardware no tiene forwarding: una escritura en B0 solo es visible
+ * para una lectura desde B3. Como una etiqueta puede recibir un salto
+ * desde otro bloque, el estado lineal del scheduler no basta para conocer
+ * la edad de todas las escrituras entrantes. Reiniciamos el seguimiento y
+ * colocamos dos bundles vacios antes del cuerpo del bloque.
+ */
+static int emitir_etiqueta_segura(Codegen *cg, const char *etiqueta)
+{
+    if (cg == NULL || etiqueta == NULL || etiqueta[0] == '\0')
+        return 0;
+
+    scheduler_inicializar(&cg->scheduler);
+
+    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta))
+        return 0;
+
+    if (SCHEDULER_SEPARACION_RAW > 1u &&
+        !asm_emitir_nops(&cg->emisor, SCHEDULER_SEPARACION_RAW - 1u))
+        return 0;
+
+    return 1;
+}
+
 static int emitir_instruccion(Codegen *cg,
                               const char *slot,
                               const char *formato,
@@ -765,7 +790,7 @@ static int emitir_salto_condicion(Codegen *cg,
             return 0;
         if (!emitir_salto_condicion(cg, der_nodo, etiqueta, 1))
             return 0;
-        return asm_emitir_etiqueta(&cg->emisor, etiqueta_aux);
+        return emitir_etiqueta_segura(cg, etiqueta_aux);
     }
 
     if (nodo->tipo == AST_OPERACION &&
@@ -787,7 +812,7 @@ static int emitir_salto_condicion(Codegen *cg,
             return 0;
         if (!emitir_salto_condicion(cg, der_nodo, etiqueta, 0))
             return 0;
-        return asm_emitir_etiqueta(&cg->emisor, etiqueta_aux);
+        return emitir_etiqueta_segura(cg, etiqueta_aux);
     }
 
     if (nodo->tipo == AST_OPERACION &&
@@ -852,9 +877,9 @@ static int generar_booleano_desde_condicion(Codegen *cg, NodoAST *nodo)
     if (!emitir_salto_condicion(cg, nodo, etiqueta_verdadero, 1) ||
         !emitir_constante(cg, reg, 0) ||
         !emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_fin) ||
-        !asm_emitir_etiqueta(&cg->emisor, etiqueta_verdadero) ||
+        !emitir_etiqueta_segura(cg, etiqueta_verdadero) ||
         !emitir_constante(cg, reg, 1) ||
-        !asm_emitir_etiqueta(&cg->emisor, etiqueta_fin)) {
+        !emitir_etiqueta_segura(cg, etiqueta_fin)) {
         liberar_temp(cg, reg);
         return -1;
     }
@@ -953,7 +978,7 @@ static int generar_multiplicacion(Codegen *cg,
         !emitir_instruccion(cg, "ALU",
                             "ADDI x%d, x%d, 1",
                             reg_signos, reg_signos) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_izq_positivo))
+        !emitir_etiqueta_segura(cg, etq_izq_positivo))
         goto error;
 
     /* Convertir el operando derecho a magnitud positiva. */
@@ -968,7 +993,7 @@ static int generar_multiplicacion(Codegen *cg,
         !emitir_instruccion(cg, "ALU",
                             "ADDI x%d, x%d, 1",
                             reg_signos, reg_signos) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_der_positivo))
+        !emitir_etiqueta_segura(cg, etq_der_positivo))
         goto error;
 
     /*
@@ -981,7 +1006,7 @@ static int generar_multiplicacion(Codegen *cg,
      *     reg_der >>= 1;
      * }
      */
-    if (!asm_emitir_etiqueta(&cg->emisor, etq_bucle))
+    if (!emitir_etiqueta_segura(cg, etq_bucle))
         goto error;
 
     if (!emitir_instruccion(cg, "BRU",
@@ -1004,7 +1029,7 @@ static int generar_multiplicacion(Codegen *cg,
                             reg_resultado, reg_resultado, reg_izq))
         goto error;
 
-    if (!asm_emitir_etiqueta(&cg->emisor, etq_sin_suma))
+    if (!emitir_etiqueta_segura(cg, etq_sin_suma))
         goto error;
 
     if (!emitir_instruccion(cg, "ALU",
@@ -1015,7 +1040,7 @@ static int generar_multiplicacion(Codegen *cg,
                             reg_der, reg_der) ||
         !emitir_instruccion(cg, "BRU",
                             "JMP %s", etq_bucle) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_fin_bucle))
+        !emitir_etiqueta_segura(cg, etq_fin_bucle))
         goto error;
 
     /*
@@ -1031,7 +1056,7 @@ static int generar_multiplicacion(Codegen *cg,
     if (!emitir_instruccion(cg, "ALU",
                             "SUB x%d, x0, x%d",
                             reg_resultado, reg_resultado) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_fin_signo))
+        !emitir_etiqueta_segura(cg, etq_fin_signo))
         goto error;
 
     liberar_temp(cg, reg_izq);
@@ -1158,7 +1183,7 @@ static int generar_division_modulo(Codegen *cg,
         !emitir_instruccion(cg, "ALU",
                             "ADDI x%d, x0, 1",
                             reg_dividendo_negativo) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_izq_positivo))
+        !emitir_etiqueta_segura(cg, etq_izq_positivo))
         goto error;
 
     /* Normalizar el divisor y acumular la paridad de signos. */
@@ -1173,7 +1198,7 @@ static int generar_division_modulo(Codegen *cg,
         !emitir_instruccion(cg, "ALU",
                             "ADDI x%d, x%d, 1",
                             reg_signos, reg_signos) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_der_positivo))
+        !emitir_etiqueta_segura(cg, etq_der_positivo))
         goto error;
 
     /* Evitar division entre cero en tiempo de ejecucion. */
@@ -1185,7 +1210,7 @@ static int generar_division_modulo(Codegen *cg,
     asm_emitir_comentario(&cg->emisor,
                           "division entre cero: cociente=0, resto=dividendo");
     if (!emitir_instruccion(cg, "BRU", "JMP %s", etq_fin_bucle) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_divisor_valido))
+        !emitir_etiqueta_segura(cg, etq_divisor_valido))
         goto error;
 
     /*
@@ -1194,7 +1219,7 @@ static int generar_division_modulo(Codegen *cg,
      *     cociente += 1;
      * }
      */
-    if (!asm_emitir_etiqueta(&cg->emisor, etq_bucle))
+    if (!emitir_etiqueta_segura(cg, etq_bucle))
         goto error;
 
     if (!emitir_instruccion(cg, "BRU",
@@ -1202,7 +1227,7 @@ static int generar_division_modulo(Codegen *cg,
                             reg_izq, reg_der, etq_restar) ||
         !emitir_instruccion(cg, "BRU",
                             "JMP %s", etq_fin_bucle) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_restar))
+        !emitir_etiqueta_segura(cg, etq_restar))
         goto error;
 
     if (!emitir_instruccion(cg, "ALU",
@@ -1213,7 +1238,7 @@ static int generar_division_modulo(Codegen *cg,
                             reg_cociente, reg_cociente) ||
         !emitir_instruccion(cg, "BRU",
                             "JMP %s", etq_bucle) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_fin_bucle))
+        !emitir_etiqueta_segura(cg, etq_fin_bucle))
         goto error;
 
     /* Un solo operando negativo => cociente negativo. */
@@ -1226,7 +1251,7 @@ static int generar_division_modulo(Codegen *cg,
     if (!emitir_instruccion(cg, "ALU",
                             "SUB x%d, x0, x%d",
                             reg_cociente, reg_cociente) ||
-        !asm_emitir_etiqueta(&cg->emisor,
+        !emitir_etiqueta_segura(cg,
                              etq_fin_signo_cociente))
         goto error;
 
@@ -1240,7 +1265,7 @@ static int generar_division_modulo(Codegen *cg,
     if (!emitir_instruccion(cg, "ALU",
                             "SUB x%d, x0, x%d",
                             reg_izq, reg_izq) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_fin_signo_resto))
+        !emitir_etiqueta_segura(cg, etq_fin_signo_resto))
         goto error;
 
     if (devolver_resto) {
@@ -1341,10 +1366,10 @@ static int generar_potencia(Codegen *cg,
                           "exponente negativo no soportado: resultado=0");
     if (!emitir_constante(cg, reg_resultado, 0) ||
         !emitir_instruccion(cg, "BRU", "JMP %s", etq_fin) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_exponente_valido))
+        !emitir_etiqueta_segura(cg, etq_exponente_valido))
         goto error;
 
-    if (!asm_emitir_etiqueta(&cg->emisor, etq_bucle))
+    if (!emitir_etiqueta_segura(cg, etq_bucle))
         goto error;
 
     /* while (exponente != 0) */
@@ -1396,7 +1421,7 @@ static int generar_potencia(Codegen *cg,
                             "ADDI x%d, x%d, -1",
                             reg_exponente, reg_exponente) ||
         !emitir_instruccion(cg, "BRU", "JMP %s", etq_bucle) ||
-        !asm_emitir_etiqueta(&cg->emisor, etq_fin))
+        !emitir_etiqueta_segura(cg, etq_fin))
         goto error;
 
     liberar_temp(cg, reg_base);
@@ -1683,7 +1708,7 @@ static int emitir_verificacion_pila(Codegen *cg,
                             "BGE x%d, x%d, %s",
                             REG_DIRECCION, REG_AUXILIAR, etiqueta_ok) ||
         !emitir_instruccion(cg, "BRU", "JMP error_pila") ||
-        !asm_emitir_etiqueta(&cg->emisor, etiqueta_ok)) {
+        !emitir_etiqueta_segura(cg, etiqueta_ok)) {
         error_codegen(cg, nodo, "no se pudo emitir verificacion de pila");
         return 0;
     }
@@ -2069,7 +2094,7 @@ static int generar_llamada(Codegen *cg, NodoAST *nodo, int necesita_resultado)
     snprintf(etiqueta_funcion, sizeof(etiqueta_funcion),
              "func_%s", nodo->valor);
     if (!emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_funcion) ||
-        !asm_emitir_etiqueta(&cg->emisor, etiqueta_retorno_llamada))
+        !emitir_etiqueta_segura(cg, etiqueta_retorno_llamada))
         return -1;
 
     /* El callee retorna con SP apuntando al primer parametro. */
@@ -2600,7 +2625,7 @@ static void generar_rama_if(Codegen *cg,
     if (!emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_fin))
         return;
 
-    asm_emitir_etiqueta(&cg->emisor, etiqueta_siguiente);
+    emitir_etiqueta_segura(cg, etiqueta_siguiente);
 
     if (continuacion->tipo == AST_IF) {
         generar_rama_if(cg, continuacion, etiqueta_fin);
@@ -2624,7 +2649,7 @@ static void generar_if(Codegen *cg, NodoAST *nodo)
 
     nueva_etiqueta(cg, "fin_if", etiqueta_fin, sizeof(etiqueta_fin));
     generar_rama_if(cg, nodo, etiqueta_fin);
-    asm_emitir_etiqueta(&cg->emisor, etiqueta_fin);
+    emitir_etiqueta_segura(cg, etiqueta_fin);
 }
 
 /*
@@ -2651,7 +2676,7 @@ static void generar_while(Codegen *cg, NodoAST *nodo)
 
     asm_emitir_comentario(&cg->emisor,
                           "inicio mientras linea %d", nodo->linea);
-    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_inicio)) {
+    if (!emitir_etiqueta_segura(cg, etiqueta_inicio)) {
         cg->errores++;
         return;
     }
@@ -2673,7 +2698,7 @@ static void generar_while(Codegen *cg, NodoAST *nodo)
     if (!emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_inicio))
         return;
 
-    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_fin))
+    if (!emitir_etiqueta_segura(cg, etiqueta_fin))
         cg->errores++;
 }
 
@@ -2709,7 +2734,7 @@ static void generar_for(Codegen *cg, NodoAST *nodo)
                           "inicializacion para linea %d", nodo->linea);
     generar_nodo(cg, inicializacion);
 
-    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_inicio)) {
+    if (!emitir_etiqueta_segura(cg, etiqueta_inicio)) {
         cg->errores++;
         return;
     }
@@ -2728,7 +2753,7 @@ static void generar_for(Codegen *cg, NodoAST *nodo)
     generar_nodo(cg, bloque);
     desapilar_bucle(cg);
 
-    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_incremento)) {
+    if (!emitir_etiqueta_segura(cg, etiqueta_incremento)) {
         cg->errores++;
         return;
     }
@@ -2739,7 +2764,7 @@ static void generar_for(Codegen *cg, NodoAST *nodo)
     if (!emitir_instruccion(cg, "BRU", "JMP %s", etiqueta_inicio))
         return;
 
-    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_fin))
+    if (!emitir_etiqueta_segura(cg, etiqueta_fin))
         cg->errores++;
 }
 
@@ -2854,7 +2879,7 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
     asm_emitir_comentario(&cg->emisor,
                           "funcion %s: x14=SP, x15=FP, retorno en x2",
                           nombre->valor);
-    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_funcion)) {
+    if (!emitir_etiqueta_segura(cg, etiqueta_funcion)) {
         cg->errores++;
         return;
     }
@@ -2885,7 +2910,7 @@ static void generar_funcion(Codegen *cg, NodoAST *nodo)
 
     generar_nodo(cg, bloque);
 
-    if (!asm_emitir_etiqueta(&cg->emisor, etiqueta_retorno)) {
+    if (!emitir_etiqueta_segura(cg, etiqueta_retorno)) {
         cg->errores++;
     } else {
         /*
@@ -2936,7 +2961,7 @@ static void generar_principal(Codegen *cg, NodoAST *nodo)
         return;
     }
 
-    if (!asm_emitir_etiqueta(&cg->emisor, "principal")) {
+    if (!emitir_etiqueta_segura(cg, "principal")) {
         cg->errores++;
         return;
     }
@@ -3266,12 +3291,12 @@ int codegen_generar_archivo(NodoAST *raiz,
     if (!cg.encontro_principal)
         error_codegen(&cg, raiz, "no se encontro la funcion principal");
 
-    asm_emitir_etiqueta(&cg.emisor, "fin_programa");
+    emitir_etiqueta_segura(&cg, "fin_programa");
     /* Etiqueta pendiente de resolver por la Fase 5. */
     asm_emitir_bundle(&cg.emisor, "BRU: JMP fin_programa");
 
     if (cg.usa_error_pila) {
-        asm_emitir_etiqueta(&cg.emisor, "error_pila");
+        emitir_etiqueta_segura(&cg, "error_pila");
         asm_emitir_bundle(&cg.emisor, "BRU: JMP error_pila");
     }
 
@@ -3431,17 +3456,7 @@ int codegen_motor_etiqueta(
     if (motor == NULL || etiqueta == NULL || etiqueta[0] == '\0')
         return 0;
 
-    /*
-     * Comenzamos un bloque nuevo sin dependencias pendientes
-     * del bloque anterior.
-     */
-    scheduler_inicializar(&motor->cg.scheduler);
-
-    /*
-     * Utilizamos el mismo emisor del CodeGen original para
-     * conservar el formato de las etiquetas del ensamblador.
-     */
-    if (!asm_emitir_etiqueta(&motor->cg.emisor, etiqueta)) {
+    if (!emitir_etiqueta_segura(&motor->cg, etiqueta)) {
         motor->cg.errores++;
         return 0;
     }
@@ -3472,7 +3487,7 @@ int codegen_motor_cargar_simbolo(
      * Solo permitimos registros temporales para no modificar
      * los registros reservados del procesador.
      */
-    if (reg_destino < REG_TEMP_PRIMERO ||
+    if (reg_destino < REG_RETORNO_VALOR ||
         reg_destino > REG_TEMP_ULTIMO)
         return 0;
 
@@ -3522,7 +3537,7 @@ int codegen_motor_guardar_simbolo(
 
     cg = &motor->cg;
 
-    if (reg_valor < REG_TEMP_PRIMERO ||
+    if (reg_valor < REG_RETORNO_VALOR ||
         reg_valor > REG_TEMP_ULTIMO)
         return 0;
 

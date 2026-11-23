@@ -2038,6 +2038,8 @@ int main(int argc, char *argv[])
         IRError error_ir_codegen = {0};
         CodegenIRConfig config_ir = {0};
         CodegenIREstadisticas estadisticas_ir = {0};
+        AsignacionRegistros mapa_codegen_ir;
+        int mapa_codegen_inicializado = 0;
         int generacion_correcta;
 
         /*
@@ -2090,10 +2092,45 @@ int main(int argc, char *argv[])
         }
 
         /*
+         * El backend IR consume directamente la asignacion final de Chaitin.
+         * Si la presion supera los nueve registros x4-x12 y no se activo
+         * spilling, la asignacion falla de forma explicita. Cuando spilling
+         * esta habilitado, el IR ya contiene los STORE/LOAD necesarios y el
+         * grafo final debe ser completamente coloreable.
+         */
+        ar_init(&mapa_codegen_ir);
+        mapa_codegen_inicializado = 1;
+
+        if (!opt_ir_asignacion_para_codegen_ir(
+                &programa_ir_codegen,
+                9,
+                4,
+                &mapa_codegen_ir))
+        {
+            if (!(fases_ir_activas & OPT_IR_SPILL))
+            {
+                fprintf(stderr,
+                        "Error: la IR requiere mas de 9 registros temporales. "
+                        "Use --spill-ir o --opt-ir.\n");
+            }
+            else
+            {
+                fprintf(stderr,
+                        "Error: el grafo final sigue sin poder colorearse "
+                        "despues de spilling.\n");
+            }
+
+            ar_free(&mapa_codegen_ir);
+            ir_free(&programa_ir_codegen);
+            goto error_compilacion;
+        }
+
+        /*
         * Reutilizamos la configuracion original:
         * memoria global y tabla de simbolos.
         */
         config_ir.original = config_codegen;
+        config_ir.asignacion_registros = &mapa_codegen_ir;
 
         /*
         * El resolvedor IR actual admite solamente
@@ -2119,6 +2156,12 @@ int main(int argc, char *argv[])
         * generacion de ensamblador.
         */
         ir_free(&programa_ir_codegen);
+
+        if (mapa_codegen_inicializado)
+        {
+            ar_free(&mapa_codegen_ir);
+            mapa_codegen_inicializado = 0;
+        }
 
         if (!generacion_correcta)
         {
