@@ -1610,8 +1610,11 @@ static int direccion_indexada_ir(EstadoIR *e, const IRInstruction *i,
     }
 
     /* offset = (fila * columnas + columna) * 4 */
-    if (!cargar(e, columna, 3) ||
-        !emitir(e, "ALU", "ADD x13, x13, x3") ||
+    /* Preservar el offset parcial antes de cargar
+       la columna, porque cargar puede modificar x13. */
+    if (!emitir(e, "ALU", "ADD x2, x13, x0") ||
+        !cargar(e, columna, 3) ||
+        !emitir(e, "ALU", "ADD x13, x2, x3") ||
         !emitir(e, "ALU", "SLLI x13, x13, 2") ||
         !base_indexada_ir(e, i, nombre, 1, 2) ||
         !emitir(e, "ALU", "ADD x13, x2, x13"))

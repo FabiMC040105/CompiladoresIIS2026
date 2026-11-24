@@ -513,7 +513,7 @@ static int indexed_declaration(Generator *g, const NodoAST *n)
         for (element = initializer->hijo, ci = 0; element; element = element->siguiente, ++ci) {
             col_text = index_string(ci);
             value = expression(g, element);
-            if (!col_text || !value || !emit(g, element, IR_ARRAY_STORE, col_text, value, id->valor))
+            if (!col_text || !value || !emit(g, n, IR_ARRAY_STORE, col_text, value, id->valor))
                 goto done;
             free(col_text); col_text = NULL;
             free(value); value = NULL;
@@ -527,7 +527,7 @@ static int indexed_declaration(Generator *g, const NodoAST *n)
                 col_text = index_string(ci);
                 value = expression(g, element);
                 if (!col_text || !value ||
-                    !emit_ex(g, element, IR_MATRIX_STORE, row_text, col_text, id->valor, value))
+                    !emit_ex(g, n, IR_MATRIX_STORE, row_text, col_text, id->valor, value))
                     goto done;
                 free(col_text); col_text = NULL;
                 free(value); value = NULL;

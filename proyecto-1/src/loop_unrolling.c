@@ -45,6 +45,10 @@ static int is_pure_assignment(IROp op)
         case IR_DIV: case IR_MOD: case IR_POW: case IR_NEG:
         case IR_EQ: case IR_NE: case IR_LT: case IR_LE:
         case IR_GT: case IR_GE:
+        /* Lecturas indexadas: se conserva el orden
+           y se renombran los temporales de cada copia. */
+        case IR_ARRAY_LOAD:
+        case IR_MATRIX_LOAD:
             return 1;
         default:
             return 0;

@@ -52,6 +52,8 @@ module tb_integracion_rtl_actual;
         .clk_mem_i(clk_mem_i),
         .rst_i(rst_i),
         .stall_i(stall_i),
+        .flush_i(1'b0),
+        .flush_done_o(),
         .global_stall_o(global_stall_o),
         .perf_cycles_o(perf_cycles_o),
         .perf_bundles_o(perf_bundles_o),
