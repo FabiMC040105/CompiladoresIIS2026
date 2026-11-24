@@ -290,8 +290,8 @@ def clones_from_c(src: Path, include_examples: bool) -> dict:
     items = [("Guardado/" + p.name, p) for p in sorted(WORKSPACE.glob("*.e")) if p.is_file()]
     if include_examples:
         items += [("Ejemplo/" + p.name, p) for p in sorted(src.glob("*.e")) if p.is_file()]
-    if len(items) < 2:
-        return {"clones": [], "files_scanned": len(items), "message": "Guarda dos archivos .e para compararlos."}
+    if len(items) < 1:
+        return {"clones": [], "files_scanned": len(items), "message": "Guarda al menos un archivo .e para buscar clones."}
     if len(items) > 25:
         raise ValueError("Hay mas de 25 archivos. Desactiva los ejemplos o reduce los archivos de prueba.")
     cmd = [str(CLONES_EXE), str(src / "lexer.l")]
@@ -316,7 +316,7 @@ def clones_from_c(src: Path, include_examples: bool) -> dict:
             except ValueError:
                 continue
     return {"clones": clones, "files_scanned": len(items),
-            "message": "Coincidencias entre archivos (3 o mas lineas y 18 o mas tokens)."}
+            "message": "Coincidencias dentro del mismo archivo y entre archivos (3 o mas lineas y 18 o mas tokens)."}
 
 
 # SERVIDOR HTTP DEL IDE

@@ -103,27 +103,39 @@ static int compatible(const Line *a,const Line *b,char mapsA[][WORD],char mapsB[
  }
  return 1;
 }
-static int match(const File *a,int i,const File *b,int j,int *lines,int *total,int *diff){
+static int match(const File *a,int i,const File *b,int j,int *lines,int *total,int *diff,int exacto){
  char ma[400][WORD],mb[400][WORD];int nmap=0,count=0,tok=0,d=0;
- while(i+count<a->n && j+count<b->n && count<80){
-   if(!compatible(&a->lines[i+count],&b->lines[j+count],ma,mb,&nmap,&d))break;
+ while(i+count<a->n && j+count<b->n && count<80 &&
+       (a!=b || i+count<j)){
+   /* No extender un clon hacia otra funcion. */
+   if(count > 0 &&
+      (!strcmp(a->lines[i+count].t[0].val, "defina") ||
+       !strcmp(b->lines[j+count].t[0].val, "defina")))
+       break;
+
+   int diff_linea=d;
+   if(!compatible(&a->lines[i+count],&b->lines[j+count],ma,mb,&nmap,&diff_linea))break;
+   if(exacto && diff_linea != d)break;
+   d=diff_linea;
    tok+=a->lines[i+count].n;count++;
  }
  *lines=count;*total=tok;*diff=d;return count>=3&&tok>=18;
 }
 int main(int argc,char **argv){
- if(argc<6||(argc-2)%2 || (argc-2)/2>MAX_FILES)return 2;
+ if(argc<4||(argc-2)%2 || (argc-2)/2>MAX_FILES)return 2;
  keywords_from(argv[1]);
  File files[MAX_FILES]={0};int nf=(argc-2)/2;
  for(int f=0;f<nf;f++)if(!load(&files[f],argv[2+2*f],argv[3+2*f]))return 3;
  int output=0;
- for(int a=0;a<nf;a++)for(int b=a+1;b<nf;b++){
+ for(int exacto=1;exacto>=0;exacto--)
+ for(int a=0;a<nf;a++)for(int b=a;b<nf;b++){
    File *fa=&files[a],*fb=&files[b];
-   for(int i=0;i<fa->n;i++)for(int j=0;j<fb->n;j++){
+   for(int i=0;i<fa->n;i++)for(int j=(a==b ? i+1 : 0);j<fb->n;j++){
      int len,nt,diff;
-     if(!match(fa,i,fb,j,&len,&nt,&diff))continue;
+     if(!match(fa,i,fb,j,&len,&nt,&diff,exacto))continue;
      /* Emitir solo maxima secuencia y evitar ventanas solapadas. */
-     if(i>0&&j>0){int prev,toks,delta;if(match(fa,i-1,fb,j-1,&prev,&toks,&delta)&&prev>len)continue;}
+     if(i>0&&j>0){int prev,toks,delta;if(match(fa,i-1,fb,j-1,&prev,&toks,&delta,exacto)&&prev>len)continue;}
+     if(!exacto && diff==0)continue;
      printf("%s\t%s\t%d\t%d\t%s\t%d\t%d\n",
        diff?"II":"I",fa->label,fa->lines[i].lineno,
        fa->lines[i+len-1].lineno,fb->label,fb->lines[j].lineno,

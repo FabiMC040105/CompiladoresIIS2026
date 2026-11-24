@@ -1675,8 +1675,9 @@ static int acceso_indexado_ir(EstadoIR *e, const IRInstruction *i,
 
     if (escritura) {
         int rv;
-        return operando_en_registro(e, valor, 3, &rv) &&
-               emitir(e, "LSU", "STORE x%d, 0(x13)", rv);
+        return emitir(e, "ALU", "ADD x2, x13, x0") &&
+               operando_en_registro(e, valor, 3, &rv) &&
+               emitir(e, "LSU", "STORE x%d, 0(x2)", rv);
     }
 
     {

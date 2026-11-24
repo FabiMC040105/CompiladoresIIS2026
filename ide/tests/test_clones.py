@@ -303,5 +303,42 @@ defina vacio principal() {
         )
 
 
+
+    def test_clon_interno_tipo_I(self):
+        codigo = """defina entero calcular(entero x) {
+ entero a = x + 1 :)
+ entero b = a * 2 :)
+ entero c = b + a :)
+ devuelva c :)
+} :)
+"""
+        clones = self.detectar({"A": codigo + "\n" + codigo})
+        self.assertTrue(any(c["tipo"] == "I" for c in clones))
+
+    def test_clon_interno_tipo_II(self):
+        codigo = """defina entero calcular_a(entero x) {
+ entero a = x + 1 :)
+ entero b = a * 2 :)
+ entero c = b + a :)
+ devuelva c :)
+} :)
+
+defina entero calcular_b(entero y) {
+ entero m = y + 1 :)
+ entero n = m * 2 :)
+ entero p = n + m :)
+ devuelva p :)
+} :)
+"""
+        clones = self.detectar({"A": codigo})
+        self.assertTrue(any(c["tipo"] == "II" for c in clones))
+
+    def test_clones_internos_no_solapados(self):
+        codigo = "entero x = x + 1 :)\n" * 10
+        clones = self.detectar({"A": codigo})
+        self.assertTrue(clones)
+        for c in clones:
+            self.assertLess(c["fin_a"], c["inicio_b"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
